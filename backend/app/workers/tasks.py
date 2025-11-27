@@ -287,3 +287,62 @@ def process_upload_job(job_id: str):
         # 清理暫存目錄
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def cleanup_expired_jobs():
+    """
+    清理過期任務
+
+    掃描 Redis 中的 job:* 鍵，刪除已過期的任務及其相關檔案
+    """
+    storage = get_storage_service()
+    now = datetime.utcnow()
+    cleaned_count = 0
+
+    # 掃描所有 job:* 鍵
+    cursor = 0
+    while True:
+        cursor, keys = redis_conn.scan(cursor, match="job:*", count=100)
+
+        for key in keys:
+            try:
+                data = redis_conn.get(key)
+                if not data:
+                    continue
+
+                job = Job.model_validate_json(data)
+
+                # 檢查是否過期
+                if job.expires_at < now:
+                    # 刪除 MinIO 中的結果檔案
+                    if job.result_key:
+                        try:
+                            storage.delete_file(job.result_key)
+                        except:
+                            pass
+
+                    # 刪除上傳檔案（如果有）
+                    if job.source_type == SourceType.UPLOAD and job.source_url:
+                        try:
+                            storage.delete_file(job.source_url)
+                        except:
+                            pass
+
+                    # 刪除 Redis 鍵
+                    redis_conn.delete(key)
+                    cleaned_count += 1
+
+            except Exception:
+                # 忽略解析錯誤的鍵
+                continue
+
+        if cursor == 0:
+            break
+
+    return cleaned_count
+
+
+def schedule_cleanup():
+    """排程清理任務"""
+    cleanup_queue = Queue("cleanup", connection=redis_conn)
+    cleanup_queue.enqueue(cleanup_expired_jobs, job_timeout=600)
