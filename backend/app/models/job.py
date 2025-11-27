@@ -31,6 +31,8 @@ class Job(BaseModel):
     progress: int = Field(default=0, ge=0, le=100)
     current_stage: Optional[str] = None
     error_message: Optional[str] = None
+    result_key: Optional[str] = None
+    original_duration: Optional[int] = None
     client_ip: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

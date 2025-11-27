@@ -1,21 +1,19 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import type { Job, JobWithResult } from './services/api';
+import { ref, onUnmounted } from 'vue';
+import { api, type Job, type JobWithResult } from './services/api';
+import UrlInput from './components/UrlInput.vue';
+import ResultView from './components/ResultView.vue';
 
 // 應用程式狀態
 const currentJob = ref<JobWithResult | null>(null);
-const isLoading = ref(false);
 const error = ref<string | null>(null);
+let pollInterval: number | null = null;
 
 // 處理任務建立
 function handleJobCreated(job: Job) {
   currentJob.value = { ...job, result: null };
   error.value = null;
-}
-
-// 處理任務更新
-function handleJobUpdated(job: JobWithResult) {
-  currentJob.value = job;
+  startPolling();
 }
 
 // 處理錯誤
@@ -25,9 +23,47 @@ function handleError(message: string) {
 
 // 重置狀態
 function reset() {
+  stopPolling();
   currentJob.value = null;
   error.value = null;
 }
+
+// 開始輪詢任務狀態
+function startPolling() {
+  if (pollInterval) return;
+
+  pollInterval = window.setInterval(async () => {
+    if (!currentJob.value) {
+      stopPolling();
+      return;
+    }
+
+    try {
+      const job = await api.getJob(currentJob.value.id);
+      currentJob.value = job;
+
+      // 如果任務完成或失敗，停止輪詢
+      if (job.status === 'completed' || job.status === 'failed') {
+        stopPolling();
+      }
+    } catch (e) {
+      // 忽略輪詢錯誤
+    }
+  }, 2000);
+}
+
+// 停止輪詢
+function stopPolling() {
+  if (pollInterval) {
+    clearInterval(pollInterval);
+    pollInterval = null;
+  }
+}
+
+// 清理
+onUnmounted(() => {
+  stopPolling();
+});
 </script>
 
 <template>
@@ -46,15 +82,19 @@ function reset() {
 
       <!-- 輸入區域 - 當沒有進行中的任務時顯示 -->
       <div v-if="!currentJob" class="input-section">
-        <!-- UrlInput 和 FileUpload 元件將在 Phase 3 和 4 加入 -->
-        <p class="placeholder">輸入區域（待實作）</p>
+        <UrlInput
+          @job-created="handleJobCreated"
+          @error="handleError"
+        />
+        <!-- FileUpload 將在 Phase 4 加入 -->
       </div>
 
       <!-- 進度和結果區域 - 當有任務時顯示 -->
       <div v-else class="result-section">
-        <!-- ProgressBar 和 ResultView 元件將在 Phase 3 和 5 加入 -->
-        <p class="placeholder">進度/結果區域（待實作）</p>
-        <button @click="reset">返回</button>
+        <ResultView
+          :job="currentJob"
+          @reset="reset"
+        />
       </div>
     </main>
 
@@ -125,32 +165,9 @@ body {
   font-size: 1rem;
 }
 
-.placeholder {
-  color: #999;
-  text-align: center;
-  padding: 2rem;
-  border: 2px dashed #ddd;
-  border-radius: 4px;
-}
-
 .input-section,
 .result-section {
   min-height: 200px;
-}
-
-.result-section button {
-  display: block;
-  margin: 1rem auto 0;
-  padding: 0.5rem 1rem;
-  background: #666;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.result-section button:hover {
-  background: #555;
 }
 
 .footer {

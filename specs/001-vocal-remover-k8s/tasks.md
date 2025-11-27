@@ -61,14 +61,14 @@
 
 ### 實作 User Story 1
 
-- [ ] T017 [US1] 建立 backend/app/services/youtube.py（yt-dlp 下載服務）
-- [ ] T018 [US1] 在 backend/app/api/v1/jobs.py 實作 POST /jobs（建立 YouTube 任務）
-- [ ] T019 [US1] 在 backend/app/api/v1/jobs.py 實作 GET /jobs/{jobId}（查詢任務狀態）
-- [ ] T020 [US1] 在 backend/app/api/v1/jobs.py 實作 GET /jobs/{jobId}/download（下載結果）
-- [ ] T021 [US1] 在 backend/app/workers/tasks.py 實作 process_youtube_job 任務（下載→分離→合併流程）
-- [ ] T022 [P] [US1] 建立 frontend/src/components/UrlInput.vue（YouTube 網址輸入元件）
-- [ ] T023 [P] [US1] 建立 frontend/src/components/ResultView.vue（結果顯示與下載元件）
-- [ ] T024 [US1] 整合前端 UrlInput 與 ResultView 到 App.vue
+- [x] T017 [US1] 建立 backend/app/services/youtube.py（yt-dlp 下載服務）
+- [x] T018 [US1] 在 backend/app/api/v1/jobs.py 實作 POST /jobs（建立 YouTube 任務）
+- [x] T019 [US1] 在 backend/app/api/v1/jobs.py 實作 GET /jobs/{jobId}（查詢任務狀態）
+- [x] T020 [US1] 在 backend/app/api/v1/jobs.py 實作 GET /jobs/{jobId}/download（下載結果）
+- [x] T021 [US1] 在 backend/app/workers/tasks.py 實作 process_youtube_job 任務（下載→分離→合併流程）
+- [x] T022 [P] [US1] 建立 frontend/src/components/UrlInput.vue（YouTube 網址輸入元件）
+- [x] T023 [P] [US1] 建立 frontend/src/components/ResultView.vue（結果顯示與下載元件）
+- [x] T024 [US1] 整合前端 UrlInput 與 ResultView 到 App.vue
 
 **Checkpoint**: User Story 1 應已完全可用且可獨立測試
 
