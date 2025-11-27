@@ -1,0 +1,87 @@
+services:
+  # Redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  # MinIO
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+
+  # API Server
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=true
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=vocal-remover
+      - MINIO_SECURE=false
+      - MAX_UPLOAD_SIZE=524288000
+      - MAX_VIDEO_DURATION=600
+      - RATE_LIMIT_REQUESTS=12
+      - RATE_LIMIT_WINDOW=3600
+      - RESULT_EXPIRY_HOURS=24
+      - JOB_TIMEOUT_MINUTES=30
+      - DEVICE=cpu
+    depends_on:
+      - redis
+      - minio
+
+  # Worker (處理任務)
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: rq worker default --url redis://redis:6379/0
+    environment:
+      - DEBUG=true
+      - REDIS_URL=redis://redis:6379/0
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_BUCKET=vocal-remover
+      - MINIO_SECURE=false
+      - MAX_UPLOAD_SIZE=524288000
+      - MAX_VIDEO_DURATION=600
+      - RESULT_EXPIRY_HOURS=24
+      - JOB_TIMEOUT_MINUTES=30
+      - DEVICE=cpu
+    depends_on:
+      - redis
+      - minio
+    volumes:
+      - worker-tmp:/tmp
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  redis-data:
+  minio-data:
+  worker-tmp:
