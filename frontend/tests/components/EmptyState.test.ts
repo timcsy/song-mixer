@@ -16,6 +16,12 @@ describe('EmptyState', () => {
     expect(wrapper.find('.empty-title').text()).toBe('No Data')
   })
 
+  it('renders default title when not provided', () => {
+    const wrapper = mount(EmptyState)
+
+    expect(wrapper.find('.empty-title').text()).toBe('尚無歌曲')
+  })
+
   it('renders description when provided', () => {
     const wrapper = mount(EmptyState, {
       props: {
@@ -27,14 +33,10 @@ describe('EmptyState', () => {
     expect(wrapper.find('.empty-description').text()).toBe('There is no data to display')
   })
 
-  it('does not render description when not provided', () => {
-    const wrapper = mount(EmptyState, {
-      props: {
-        title: 'No Data',
-      },
-    })
+  it('renders default description when not provided', () => {
+    const wrapper = mount(EmptyState)
 
-    expect(wrapper.find('.empty-description').exists()).toBe(false)
+    expect(wrapper.find('.empty-description').text()).toBe('點擊「新增歌曲」開始處理您的第一首歌曲')
   })
 
   it('renders action slot content', () => {
