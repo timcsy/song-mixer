@@ -3,13 +3,6 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 
-# Task queue
-rq==1.15.1
-redis==5.0.1
-
-# Storage
-boto3==1.33.0
-
 # YouTube download
 yt-dlp>=2024.11.0
 

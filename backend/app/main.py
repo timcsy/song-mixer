@@ -1,9 +1,19 @@
+import logging
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.api.v1 import health, jobs
+
+# 設定 logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -25,9 +35,20 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+async def startup_event():
+    """應用程式啟動事件"""
+    # 確保資料目錄存在
+    Path(settings.uploads_dir).mkdir(parents=True, exist_ok=True)
+    Path(settings.results_dir).mkdir(parents=True, exist_ok=True)
+    logger.info(f"資料目錄已就緒: {settings.data_dir}")
+    logger.info(f"應用程式已啟動: {settings.app_name}")
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全域例外處理"""
+    logger.error(f"未處理的例外: {exc}")
     return JSONResponse(
         status_code=500,
         content={

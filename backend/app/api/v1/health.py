@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from fastapi import APIRouter
-import redis
 
 from app.core.config import get_settings
+from app.services.job_manager import get_job_manager
 
 router = APIRouter()
 settings = get_settings()
@@ -12,42 +14,28 @@ async def health_check():
     """
     健康檢查
 
-    檢查服務及其依賴項是否正常運作
+    檢查服務是否正常運作
     """
-    redis_ok = False
     storage_ok = False
 
-    # Check Redis
+    # Check local storage directories
     try:
-        r = redis.from_url(settings.redis_url)
-        r.ping()
-        redis_ok = True
-    except:
+        uploads_path = Path(settings.uploads_dir)
+        results_path = Path(settings.results_dir)
+        storage_ok = uploads_path.exists() and results_path.exists()
+    except Exception:
         pass
 
-    # Check MinIO (basic connectivity)
-    try:
-        import boto3
-        from botocore.client import Config
+    # Get processing status
+    job_manager = get_job_manager()
+    processing_count = job_manager.get_processing_count()
 
-        client = boto3.client(
-            "s3",
-            endpoint_url=f"{'https' if settings.minio_secure else 'http'}://{settings.minio_endpoint}",
-            aws_access_key_id=settings.minio_access_key,
-            aws_secret_access_key=settings.minio_secret_key,
-            config=Config(signature_version="s3v4"),
-            region_name="us-east-1"
-        )
-        client.list_buckets()
-        storage_ok = True
-    except:
-        pass
-
-    status = "healthy" if (redis_ok and storage_ok) else "unhealthy"
+    status = "healthy" if storage_ok else "unhealthy"
 
     return {
         "status": status,
-        "redis": redis_ok,
         "storage": storage_ok,
+        "processing_jobs": processing_count,
+        "max_concurrent_jobs": settings.max_concurrent_jobs,
         "version": "1.0.0"
     }

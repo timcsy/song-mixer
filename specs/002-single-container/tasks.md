@@ -25,11 +25,11 @@
 
 **Purpose**: 專案結構準備與依賴清理
 
-- [ ] T001 建立 docker/ 目錄結構
-- [ ] T002 更新 backend/requirements.txt 移除 redis, boto3, rq 依賴
-- [ ] T003 [P] 刪除 backend/app/workers/ 目錄（Celery/RQ 相關）
-- [ ] T004 [P] 刪除 helm/ 目錄（K8s 相關）
-- [ ] T005 [P] 刪除 k8s/ 目錄（K8s 相關）
+- [x] T001 建立 docker/ 目錄結構
+- [x] T002 更新 backend/requirements.txt 移除 redis, boto3, rq 依賴
+- [x] T003 [P] 刪除 backend/app/workers/ 目錄（Celery/RQ 相關）
+- [x] T004 [P] 刪除 helm/ 目錄（K8s 相關）
+- [x] T005 [P] 刪除 k8s/ 目錄（K8s 相關）
 
 ---
 
@@ -39,12 +39,12 @@
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T006 重構 backend/app/core/config.py 移除 Redis/MinIO 設定，新增本地儲存路徑設定
-- [ ] T007 建立 backend/app/services/local_storage.py 實作本地檔案系統儲存服務
-- [ ] T008 建立 backend/app/services/job_manager.py 實作記憶體任務狀態管理
-- [ ] T009 建立 backend/app/services/processor.py 實作背景任務處理（threading）
-- [ ] T010 更新 backend/app/services/youtube.py 移除 cobalt fallback 相關程式碼
-- [ ] T011 更新 backend/app/main.py 整合新的服務模組
+- [x] T006 重構 backend/app/core/config.py 移除 Redis/MinIO 設定，新增本地儲存路徑設定
+- [x] T007 建立 backend/app/services/local_storage.py 實作本地檔案系統儲存服務
+- [x] T008 建立 backend/app/services/job_manager.py 實作記憶體任務狀態管理
+- [x] T009 建立 backend/app/services/processor.py 實作背景任務處理（threading）
+- [x] T010 更新 backend/app/services/youtube.py 移除 cobalt fallback 相關程式碼
+- [x] T011 更新 backend/app/main.py 整合新的服務模組
 
 **Checkpoint**: Foundation ready - user story implementation can now begin
 
@@ -58,11 +58,11 @@
 
 ### Implementation for User Story 1
 
-- [ ] T012 [US1] 建立 docker/nginx.conf Nginx 設定檔（靜態檔案 + API 反向代理）
-- [ ] T013 [US1] 建立 docker/supervisord.conf Supervisor 設定檔（管理 Nginx + Uvicorn）
-- [ ] T014 [US1] 建立根目錄 Dockerfile 多階段建置（frontend-builder → backend → final）
-- [ ] T015 [US1] 簡化 docker-compose.yml 為單一服務設定
-- [ ] T016 [US1] 更新 backend/app/api/v1/health.py 確認 health check 端點正常
+- [x] T012 [US1] 建立 docker/nginx.conf Nginx 設定檔（靜態檔案 + API 反向代理）
+- [x] T013 [US1] 建立 docker/supervisord.conf Supervisor 設定檔（管理 Nginx + Uvicorn）
+- [x] T014 [US1] 建立根目錄 Dockerfile 多階段建置（frontend-builder → backend → final）
+- [x] T015 [US1] 簡化 docker-compose.yml 為單一服務設定
+- [x] T016 [US1] 更新 backend/app/api/v1/health.py 確認 health check 端點正常
 
 **Checkpoint**: 容器可建置並啟動，前端介面可存取
 
@@ -76,12 +76,12 @@
 
 ### Implementation for User Story 2
 
-- [ ] T017 [US2] 更新 backend/app/api/v1/jobs.py 中的 upload 端點使用新的 local_storage 和 job_manager
-- [ ] T018 [US2] 更新 backend/app/api/v1/jobs.py 中的 get_job 端點使用 job_manager
-- [ ] T019 [US2] 更新 backend/app/api/v1/jobs.py 中的 download 端點直接讀取本地檔案
-- [ ] T020 [US2] 更新 backend/app/api/v1/jobs.py 中的 stream 端點支援 Range 請求
-- [ ] T021 [US2] 整合 processor.py 與上傳任務流程（提取音頻 → 分離 → 合併）
-- [ ] T022 [US2] 新增並發任務限制檢查（超過限制回傳 503）
+- [x] T017 [US2] 更新 backend/app/api/v1/jobs.py 中的 upload 端點使用新的 local_storage 和 job_manager
+- [x] T018 [US2] 更新 backend/app/api/v1/jobs.py 中的 get_job 端點使用 job_manager
+- [x] T019 [US2] 更新 backend/app/api/v1/jobs.py 中的 download 端點直接讀取本地檔案
+- [x] T020 [US2] 更新 backend/app/api/v1/jobs.py 中的 stream 端點支援 Range 請求
+- [x] T021 [US2] 整合 processor.py 與上傳任務流程（提取音頻 → 分離 → 合併）
+- [x] T022 [US2] 新增並發任務限制檢查（超過限制回傳 503）
 
 **Checkpoint**: 上傳影片功能完整運作
 
@@ -95,9 +95,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] 更新 backend/app/api/v1/jobs.py 中的 youtube 端點使用新的 job_manager
-- [ ] T024 [US3] 整合 processor.py 與 YouTube 任務流程（下載 → 提取音頻 → 分離 → 合併）
-- [ ] T025 [US3] 確認 YouTube URL 驗證與錯誤處理正常
+- [x] T023 [US3] 更新 backend/app/api/v1/jobs.py 中的 youtube 端點使用新的 job_manager
+- [x] T024 [US3] 整合 processor.py 與 YouTube 任務流程（下載 → 提取音頻 → 分離 → 合併）
+- [x] T025 [US3] 確認 YouTube URL 驗證與錯誤處理正常
 
 **Checkpoint**: YouTube 處理功能完整運作
 
@@ -107,11 +107,11 @@
 
 **Purpose**: 清理與最終驗證
 
-- [ ] T026 [P] 刪除 frontend/Dockerfile（已整合至根目錄 Dockerfile）
-- [ ] T027 [P] 更新 backend/Dockerfile 為簡化版（僅用於開發）
-- [ ] T028 刪除不再使用的 backend/app/services/storage.py（MinIO 版本）
-- [ ] T029 手動測試完整流程：建置 → 啟動 → 上傳 → 處理 → 下載
-- [ ] T030 驗證 quickstart.md 中的指令可正常執行
+- [x] T026 [P] 刪除 frontend/Dockerfile（已整合至根目錄 Dockerfile）
+- [x] T027 [P] 更新 backend/Dockerfile 為簡化版（僅用於開發）
+- [x] T028 刪除不再使用的 backend/app/services/storage.py（MinIO 版本）
+- [x] T029 手動測試完整流程：建置 → 啟動 → 上傳 → 處理 → 下載
+- [x] T030 驗證 quickstart.md 中的指令可正常執行
 
 ---
 

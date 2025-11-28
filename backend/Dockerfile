@@ -1,3 +1,4 @@
+# Development Dockerfile for backend only
 FROM python:3.11-slim
 
 # Install system dependencies
@@ -16,10 +17,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app/ ./app/
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
-USER appuser
+# Create data directories
+RUN mkdir -p /data/uploads /data/results
+
+# Environment variables
+ENV DATA_DIR=/data
+ENV UPLOADS_DIR=/data/uploads
+ENV RESULTS_DIR=/data/results
+ENV DEVICE=cpu
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
