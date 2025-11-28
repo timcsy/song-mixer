@@ -22,9 +22,9 @@
 
 **Purpose**: 新增依賴與基礎設定
 
-- [ ] T001 安裝前端 Tone.js 依賴 in `frontend/package.json`
-- [ ] T002 [P] 確認 Docker 映像包含 librubberband in `Dockerfile`
-- [ ] T003 [P] 新增前端型別定義 in `frontend/src/types/audio.ts`
+- [x] T001 安裝前端 Tone.js 依賴 in `frontend/package.json`
+- [x] T002 [P] 確認 Docker 映像包含 librubberband in `Dockerfile`
+- [x] T003 [P] 新增前端型別定義 in `frontend/src/types/audio.ts`
 
 ---
 
@@ -34,13 +34,13 @@
 
 **⚠️ CRITICAL**: 必須完成此階段才能開始 User Story 實作
 
-- [ ] T004 新增 TrackPaths 類別 in `backend/app/models/job.py`
-- [ ] T005 新增 OutputFormat 列舉 in `backend/app/models/job.py`
-- [ ] T006 新增 MixSettings 類別 in `backend/app/models/job.py`
-- [ ] T007 擴充 Job 模型新增 track_paths 和 sample_rate 欄位 in `backend/app/models/job.py`
-- [ ] T008 修改 separator.py 輸出四軌（drums, bass, other, vocals）in `backend/app/services/separator.py`
-- [ ] T009 修改 processor.py 儲存四軌路徑到 Job in `backend/app/services/processor.py`
-- [ ] T010 [P] 建立 mixer.py 服務框架 in `backend/app/services/mixer.py`
+- [x] T004 新增 TrackPaths 類別 in `backend/app/models/job.py`
+- [x] T005 新增 OutputFormat 列舉 in `backend/app/models/job.py`
+- [x] T006 新增 MixSettings 類別 in `backend/app/models/job.py`
+- [x] T007 擴充 Job 模型新增 track_paths 和 sample_rate 欄位 in `backend/app/models/job.py`
+- [x] T008 修改 separator.py 輸出四軌（drums, bass, other, vocals）in `backend/app/services/separator.py`
+- [x] T009 修改 processor.py 儲存四軌路徑到 Job in `backend/app/services/processor.py`
+- [x] T010 [P] 建立 mixer.py 服務框架 in `backend/app/services/mixer.py`
 
 **Checkpoint**: 基礎架構就緒，分離後可產生四軌檔案
 
@@ -54,14 +54,14 @@
 
 ### Implementation for User Story 1
 
-- [ ] T011 [P] [US1] 實作 GET /jobs/{id}/tracks API in `backend/app/api/v1/jobs.py`
-- [ ] T012 [P] [US1] 實作 GET /jobs/{id}/tracks/{name} 串流 API (支援 Range) in `backend/app/api/v1/jobs.py`
-- [ ] T013 [P] [US1] 建立 useWebAudio composable（載入、播放、音量控制）in `frontend/src/composables/useWebAudio.ts`
-- [ ] T014 [P] [US1] 建立 useAudioSync composable（影片音頻同步）in `frontend/src/composables/useAudioSync.ts`
-- [ ] T015 [US1] 建立 TrackSlider 組件 in `frontend/src/components/AudioMixer/TrackSlider.vue`
-- [ ] T016 [US1] 建立 AudioMixer 主容器組件 in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T017 [US1] 整合 AudioMixer 到 ResultView in `frontend/src/components/ResultView.vue`
-- [ ] T018 [US1] 實作預設音量（人聲 0%，其他 100%）in `frontend/src/composables/useWebAudio.ts`
+- [x] T011 [P] [US1] 實作 GET /jobs/{id}/tracks API in `backend/app/api/v1/jobs.py`
+- [x] T012 [P] [US1] 實作 GET /jobs/{id}/tracks/{name} 串流 API (支援 Range) in `backend/app/api/v1/jobs.py`
+- [x] T013 [P] [US1] 建立 useWebAudio composable（載入、播放、音量控制）in `frontend/src/composables/useWebAudio.ts`
+- [x] T014 [P] [US1] 建立 useAudioSync composable（影片音頻同步）in `frontend/src/composables/useAudioSync.ts`
+- [x] T015 [US1] 建立 TrackSlider 組件 in `frontend/src/components/AudioMixer/TrackSlider.vue`
+- [x] T016 [US1] 建立 AudioMixer 主容器組件 in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T017 [US1] 整合 AudioMixer 到 ResultView in `frontend/src/components/ResultView.vue`
+- [x] T018 [US1] 實作預設音量（人聲 0%，其他 100%）in `frontend/src/composables/useWebAudio.ts`
 
 **Checkpoint**: 可調整四軌音量並即時聽到效果
 
@@ -75,10 +75,10 @@
 
 ### Implementation for User Story 2
 
-- [ ] T019 [P] [US2] 在 useWebAudio 加入 Tone.js PitchShift 效果器 in `frontend/src/composables/useWebAudio.ts`
-- [ ] T020 [US2] 建立 PitchControl 組件 in `frontend/src/components/AudioMixer/PitchControl.vue`
-- [ ] T021 [US2] 整合 PitchControl 到 AudioMixer in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T022 [US2] 實作音高調整邏輯（維持原速）in `frontend/src/composables/useWebAudio.ts`
+- [x] T019 [P] [US2] 在 useWebAudio 加入 Tone.js PitchShift 效果器 in `frontend/src/composables/useWebAudio.ts`
+- [x] T020 [US2] 建立 PitchControl 組件 in `frontend/src/components/AudioMixer/PitchControl.vue`
+- [x] T021 [US2] 整合 PitchControl 到 AudioMixer in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T022 [US2] 實作音高調整邏輯（維持原速）in `frontend/src/composables/useWebAudio.ts`
 
 **Checkpoint**: 可調整升降 Key 並即時聽到效果
 
@@ -92,9 +92,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T023 [US3] 新增導唱開關按鈕到 AudioMixer in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T024 [US3] 實作導唱切換邏輯（人聲音量 0 ↔ 100%）in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T025 [US3] 按鈕狀態同步顯示（開啟/關閉）in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T023 [US3] 新增導唱開關按鈕到 AudioMixer in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T024 [US3] 實作導唱切換邏輯（人聲音量 0 ↔ 100%）in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T025 [US3] 按鈕狀態同步顯示（開啟/關閉）in `frontend/src/components/AudioMixer/AudioMixer.vue`
 
 **Checkpoint**: 導唱功能可正常切換
 
@@ -108,16 +108,16 @@
 
 ### Implementation for User Story 4
 
-- [ ] T026 [P] [US4] 實作 AudioMixer.mix_tracks 方法（FFmpeg 混音）in `backend/app/services/mixer.py`
-- [ ] T027 [P] [US4] 實作 pitch shift 計算（2^(semitones/12)）in `backend/app/services/mixer.py`
-- [ ] T028 [US4] 實作四種輸出格式（MP4, MP3, M4A, WAV）in `backend/app/services/mixer.py`
-- [ ] T029 [US4] 實作混音快取機制（設定雜湊索引）in `backend/app/services/mixer.py`
-- [ ] T030 [US4] 實作 POST /jobs/{id}/mix API in `backend/app/api/v1/jobs.py`
-- [ ] T031 [US4] 實作 GET /jobs/{id}/mix/{mix_id} 狀態查詢 API in `backend/app/api/v1/jobs.py`
-- [ ] T032 [US4] 實作 GET /jobs/{id}/mix/{mix_id}/download API in `backend/app/api/v1/jobs.py`
-- [ ] T033 [US4] 新增下載格式選擇 UI in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T034 [US4] 新增前端 API 呼叫（mix, 狀態查詢, 下載）in `frontend/src/services/api.ts`
-- [ ] T035 [US4] 實作下載進度顯示 in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T026 [P] [US4] 實作 AudioMixer.mix_tracks 方法（FFmpeg 混音）in `backend/app/services/mixer.py`
+- [x] T027 [P] [US4] 實作 pitch shift 計算（2^(semitones/12)）in `backend/app/services/mixer.py`
+- [x] T028 [US4] 實作四種輸出格式（MP4, MP3, M4A, WAV）in `backend/app/services/mixer.py`
+- [x] T029 [US4] 實作混音快取機制（設定雜湊索引）in `backend/app/services/mixer.py`
+- [x] T030 [US4] 實作 POST /jobs/{id}/mix API in `backend/app/api/v1/jobs.py`
+- [x] T031 [US4] 實作 GET /jobs/{id}/mix/{mix_id} 狀態查詢 API in `backend/app/api/v1/jobs.py`
+- [x] T032 [US4] 實作 GET /jobs/{id}/mix/{mix_id}/download API in `backend/app/api/v1/jobs.py`
+- [x] T033 [US4] 新增下載格式選擇 UI in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T034 [US4] 新增前端 API 呼叫（mix, 狀態查詢, 下載）in `frontend/src/services/api.ts`
+- [x] T035 [US4] 實作下載進度顯示 in `frontend/src/components/AudioMixer/AudioMixer.vue`
 
 **Checkpoint**: 可下載自訂混音檔案
 
@@ -127,10 +127,10 @@
 
 **Purpose**: 最終整合與品質提升
 
-- [ ] T036 [P] 處理網路中斷時的錯誤提示 in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T037 [P] 處理音軌載入失敗的錯誤提示 in `frontend/src/composables/useWebAudio.ts`
-- [ ] T038 [P] 處理瀏覽器不支援 Web Audio API 的相容性提示 in `frontend/src/components/AudioMixer/AudioMixer.vue`
-- [ ] T039 重新建置 Docker image 並測試 in `Dockerfile`
+- [x] T036 [P] 處理網路中斷時的錯誤提示 in `frontend/src/components/AudioMixer/AudioMixer.vue`
+- [x] T037 [P] 處理音軌載入失敗的錯誤提示 in `frontend/src/composables/useWebAudio.ts`
+- [x] T038 [P] 處理瀏覽器不支援 Web Audio API 的相容性提示 in `frontend/src/composables/useWebAudio.ts`
+- [x] T039 重新建置 Docker image 並測試 in `Dockerfile`
 - [ ] T040 執行 quickstart.md 驗證清單 in `specs/003-advanced-audio-mixer/quickstart.md`
 
 ---

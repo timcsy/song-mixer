@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { api, type JobWithResult } from '../services/api';
+import { ref, computed, watch } from 'vue';
+import { api, type JobWithResult, type MixRequest, type OutputFormat } from '../services/api';
 import ProgressBar from './ProgressBar.vue';
+import AudioMixer from './AudioMixer/AudioMixer.vue';
 
 const props = defineProps<{
   job: JobWithResult;
@@ -15,6 +16,97 @@ const isCompleted = computed(() => props.job.status === 'completed');
 const isFailed = computed(() => props.job.status === 'failed');
 const isProcessing = computed(() => !isCompleted.value && !isFailed.value);
 
+// Video element reference for AudioMixer sync
+const videoElement = ref<HTMLVideoElement | null>(null);
+
+// AudioMixer reference
+const audioMixerRef = ref<InstanceType<typeof AudioMixer> | null>(null);
+
+// AudioMixer state
+const mixerReady = ref(false);
+const mixerError = ref<string | null>(null);
+
+const handleMixerReady = () => {
+  mixerReady.value = true;
+};
+
+const handleMixerError = (message: string) => {
+  mixerError.value = message;
+};
+
+// ========== 下載功能 ==========
+const selectedFormat = ref<OutputFormat>('mp4');
+const isDownloading = ref(false);
+const downloadProgress = ref(0);
+const downloadError = ref<string | null>(null);
+
+const formatOptions: { value: OutputFormat; label: string }[] = [
+  { value: 'mp4', label: 'MP4' },
+  { value: 'm4a', label: 'M4A' },
+  { value: 'mp3', label: 'MP3' },
+  { value: 'wav', label: 'WAV' },
+];
+
+const startDownload = async () => {
+  if (isDownloading.value || !audioMixerRef.value) return;
+
+  isDownloading.value = true;
+  downloadProgress.value = 0;
+  downloadError.value = null;
+
+  try {
+    // Get current mixer settings
+    const mixer = audioMixerRef.value;
+    const mixRequest: MixRequest = {
+      drums_volume: mixer.tracks?.drums?.volume ?? 1,
+      bass_volume: mixer.tracks?.bass?.volume ?? 1,
+      other_volume: mixer.tracks?.other?.volume ?? 1,
+      vocals_volume: mixer.tracks?.vocals?.volume ?? 0,
+      pitch_shift: mixer.pitchShift?.value ?? 0,
+      output_format: selectedFormat.value,
+    };
+
+    const response = await api.createMix(props.job.id, mixRequest);
+
+    if (response.status === 'completed' && response.download_url) {
+      triggerDownload(response.download_url);
+      return;
+    }
+
+    // Poll for completion
+    const mixId = response.mix_id;
+    const pollInterval = setInterval(async () => {
+      try {
+        const status = await api.getMixStatus(props.job.id, mixId);
+        downloadProgress.value = status.progress;
+
+        if (status.status === 'completed' && status.download_url) {
+          clearInterval(pollInterval);
+          triggerDownload(status.download_url);
+        } else if (status.status === 'failed') {
+          clearInterval(pollInterval);
+          downloadError.value = status.error_message || '混音失敗';
+          isDownloading.value = false;
+        }
+      } catch {
+        clearInterval(pollInterval);
+        downloadError.value = '查詢狀態失敗';
+        isDownloading.value = false;
+      }
+    }, 1000);
+  } catch {
+    downloadError.value = '建立混音任務失敗';
+    isDownloading.value = false;
+  }
+};
+
+const triggerDownload = (url: string) => {
+  // 直接在新分頁開啟下載 URL，讓瀏覽器處理下載
+  // 後端已設定 Content-Disposition: attachment
+  window.open(url, '_blank');
+  isDownloading.value = false;
+};
+
 const statusText = computed(() => {
   switch (props.job.status) {
     case 'pending':
@@ -24,7 +116,7 @@ const statusText = computed(() => {
     case 'separating':
       return '分離人聲中';
     case 'merging':
-      return '合併影片中';
+      return '影片擷取中';
     case 'completed':
       return '處理完成';
     case 'failed':
@@ -42,12 +134,10 @@ const progressText = computed(() => {
 });
 
 const downloadUrl = computed(() => {
-  // 使用 API 下載端點
   return api.getDownloadUrl(props.job.id);
 });
 
 const streamUrl = computed(() => {
-  // 使用支援 Range 請求的串流端點，讓影片可以 seek
   return api.getStreamUrl(props.job.id);
 });
 
@@ -66,6 +156,17 @@ const durationText = computed(() => {
   const secs = seconds % 60;
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 });
+
+// Fullscreen toggle
+const toggleFullscreen = () => {
+  if (videoElement.value) {
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      videoElement.value.requestFullscreen();
+    }
+  }
+};
 </script>
 
 <template>
@@ -85,33 +186,87 @@ const durationText = computed(() => {
 
     <!-- 完成 -->
     <div v-else-if="isCompleted" class="completed">
-      <div class="status-icon success-icon">✓</div>
-      <h2>處理完成</h2>
+      <!-- 主要區域：左側影片+播放 / 右側混音 -->
+      <div class="main-area">
+        <!-- 左側：影片 + 播放控制 -->
+        <div class="left-panel">
+          <div class="video-wrapper">
+            <video
+              ref="videoElement"
+              :src="streamUrl"
+              preload="metadata"
+              controls
+              controlsList="nodownload noplaybackrate"
+              disablePictureInPicture
+              muted
+            >
+              您的瀏覽器不支援影片播放
+            </video>
+          </div>
+        </div>
 
-      <!-- 影片預覽播放器 -->
-      <div class="video-preview">
-        <h3>伴奏影片預覽</h3>
-        <div class="video-container">
-          <video
-            :src="streamUrl"
-            controls
-            preload="metadata"
-          >
-            您的瀏覽器不支援影片播放
-          </video>
+        <!-- 右側：混音控制 -->
+        <div class="right-panel">
+          <AudioMixer
+            ref="audioMixerRef"
+            :job-id="job.id"
+            :video-element="videoElement"
+            :title="job.source_title || '音軌混音'"
+            @ready="handleMixerReady"
+            @error="handleMixerError"
+            hide-download
+            hide-playback-controls
+          />
         </div>
       </div>
 
-      <div class="result-info" v-if="job.result">
-        <p v-if="durationText">影片長度：{{ durationText }}</p>
-        <p v-if="fileSizeText">檔案大小：{{ fileSizeText }}</p>
+      <!-- 下方：下載區 -->
+      <div class="download-area">
+        <div class="info-section">
+          <span v-if="durationText" class="info-item">
+            <svg viewBox="0 0 24 24" fill="currentColor" class="info-icon">
+              <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+            </svg>
+            {{ durationText }}
+          </span>
+          <span v-if="fileSizeText" class="info-item">
+            <svg viewBox="0 0 24 24" fill="currentColor" class="info-icon">
+              <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14l-5-5h3V8h4v4h3l-5 5z"/>
+            </svg>
+            {{ fileSizeText }}
+          </span>
+        </div>
+        <div class="download-actions">
+          <div class="format-selector">
+            <label
+              v-for="opt in formatOptions"
+              :key="opt.value"
+              class="format-option"
+              :class="{ selected: selectedFormat === opt.value }"
+            >
+              <input
+                type="radio"
+                :value="opt.value"
+                v-model="selectedFormat"
+                :disabled="isDownloading"
+              />
+              {{ opt.label }}
+            </label>
+          </div>
+          <button
+            @click="startDownload"
+            class="download-btn primary"
+            :disabled="!mixerReady || isDownloading"
+          >
+            <span v-if="isDownloading">{{ downloadProgress }}%</span>
+            <span v-else>下載</span>
+          </button>
+          <button @click="emit('reset')" class="download-btn secondary">
+            處理新影片
+          </button>
+        </div>
+        <div v-if="downloadError" class="download-error">{{ downloadError }}</div>
       </div>
-      <a :href="downloadUrl" class="download-btn" download>
-        下載伴奏影片
-      </a>
-      <button @click="emit('reset')" class="new-btn">
-        處理新影片
-      </button>
     </div>
 
     <!-- 失敗 -->
@@ -128,14 +283,29 @@ const durationText = computed(() => {
 
 <style scoped>
 .result-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Processing state */
+.processing {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   padding: 2rem;
+  max-width: 400px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .status-icon {
   width: 64px;
   height: 64px;
-  margin: 0 auto 1rem;
+  margin-bottom: 1rem;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -145,11 +315,6 @@ const durationText = computed(() => {
 
 .processing-icon {
   background: #e8f4fd;
-}
-
-.success-icon {
-  background: #e8f8e8;
-  color: #4caf50;
 }
 
 .error-icon {
@@ -167,78 +332,217 @@ const durationText = computed(() => {
 }
 
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 h2 {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   margin-bottom: 0.5rem;
   color: #333;
 }
 
-.progress-text {
-  color: #666;
-  margin-bottom: 1rem;
+/* Completed state */
+.completed {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  gap: 1rem;
+  min-height: 0;
 }
 
-.progress-bar {
-  width: 100%;
-  max-width: 300px;
-  height: 8px;
-  background: #e0e0e0;
-  border-radius: 4px;
-  margin: 0 auto;
+/* Main area: video + mixer */
+.main-area {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 1rem;
+  min-height: 0;
+}
+
+/* Left panel: video */
+.left-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.video-wrapper {
+  position: relative;
+  flex: 1;
+  background: #000;
+  border-radius: 8px;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.progress-fill {
-  height: 100%;
-  background: #4a90d9;
-  border-radius: 4px;
-  transition: width 0.3s ease;
+.video-wrapper video {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
 }
 
-.result-info {
-  margin: 1rem 0;
+/* 隱藏影片播放列的下載、播放速度和音量按鈕（音量由混音器控制） */
+.video-wrapper video::-webkit-media-controls-download-button,
+.video-wrapper video::-webkit-media-controls-playback-rate-button,
+.video-wrapper video::-webkit-media-controls-mute-button,
+.video-wrapper video::-webkit-media-controls-volume-slider {
+  display: none !important;
+}
+
+/* Right panel: mixer */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.right-panel :deep(.audio-mixer) {
+  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel :deep(.mixer-content) {
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Download area */
+.download-area {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.info-section {
+  display: flex;
+  gap: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   color: #666;
+  font-size: 0.875rem;
 }
 
-.result-info p {
-  margin: 0.25rem 0;
+.info-icon {
+  width: 18px;
+  height: 18px;
+  opacity: 0.7;
+}
+
+.download-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.format-selector {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.format-option {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.2s;
+}
+
+.format-option:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.format-option:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.format-option:not(:last-child) {
+  border-right: none;
+}
+
+.format-option:hover {
+  background: #f5f5f5;
+}
+
+.format-option.selected {
+  background: #4a90d9;
+  border-color: #4a90d9;
+  color: white;
+}
+
+.format-option input {
+  display: none;
+}
+
+.download-error {
+  width: 100%;
+  padding: 0.5rem;
+  background: #fee;
+  color: #c00;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  text-align: center;
 }
 
 .download-btn {
-  display: inline-block;
-  padding: 0.75rem 2rem;
-  background: #4caf50;
-  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.625rem 1.25rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
   text-decoration: none;
-  border-radius: 4px;
-  font-size: 1rem;
-  margin-top: 1rem;
+  border: none;
 }
 
-.download-btn:hover {
+.download-btn.primary {
+  background: #4caf50;
+  color: white;
+}
+
+.download-btn.primary:hover {
   background: #43a047;
 }
 
-.new-btn,
-.retry-btn {
-  display: block;
-  margin: 1rem auto 0;
-  padding: 0.5rem 1rem;
-  background: none;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+.download-btn.secondary {
+  background: white;
   color: #666;
-  cursor: pointer;
+  border: 1px solid #ddd;
 }
 
-.new-btn:hover,
-.retry-btn:hover {
+.download-btn.secondary:hover {
   background: #f5f5f5;
+  border-color: #ccc;
+}
+
+/* Failed state */
+.failed {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem;
 }
 
 .error-message {
@@ -247,40 +551,76 @@ h2 {
 }
 
 .retry-btn {
+  padding: 0.625rem 1.5rem;
   background: #4a90d9;
   color: white;
   border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
 }
 
 .retry-btn:hover {
   background: #3a7bc8;
 }
 
-.video-preview {
-  margin: 1.5rem 0;
-  text-align: left;
+/* RWD: Tablet & smaller screens */
+@media (max-width: 900px) {
+  .main-area {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .video-wrapper {
+    aspect-ratio: 16 / 9;
+    flex: none;
+  }
+
+  .download-area {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .info-section {
+    justify-content: center;
+  }
+
+  .download-actions {
+    flex-direction: column;
+  }
+
+  .download-btn {
+    width: 100%;
+  }
 }
 
-.video-preview h3 {
-  font-size: 1rem;
-  color: #666;
-  margin-bottom: 0.75rem;
-  text-align: center;
-}
+/* RWD: Mobile */
+@media (max-width: 600px) {
+  .completed {
+    padding: 0.5rem;
+    gap: 0.75rem;
+  }
 
-.video-container {
-  position: relative;
-  width: 100%;
-  max-width: 640px;
-  margin: 0 auto;
-  background: #000;
-  border-radius: 8px;
-  overflow: hidden;
-}
+  .video-wrapper {
+    border-radius: 6px;
+  }
 
-.video-container video {
-  width: 100%;
-  height: auto;
-  display: block;
+  .fullscreen-btn {
+    opacity: 1;
+    width: 32px;
+    height: 32px;
+    bottom: 8px;
+    right: 8px;
+  }
+
+  .download-area {
+    padding: 0.75rem;
+  }
+
+  .info-section {
+    gap: 1rem;
+    font-size: 0.75rem;
+  }
 }
 </style>

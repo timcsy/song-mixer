@@ -16,7 +16,7 @@ const statusInfo = computed(() => {
     case 'separating':
       return { text: '分離人聲', icon: '🎵', estimatedTime: estimateTime(20, 70) };
     case 'merging':
-      return { text: '合併影片', icon: '🎬', estimatedTime: estimateTime(70, 90) };
+      return { text: '影片擷取', icon: '🎬', estimatedTime: estimateTime(70, 90) };
     default:
       return { text: '處理中', icon: '⚙️', estimatedTime: '' };
   }
@@ -49,7 +49,7 @@ function estimateTime(startPercent: number, endPercent: number): string {
 const stages = [
   { key: 'downloading', label: '下載', icon: '⬇️' },
   { key: 'separating', label: '分離', icon: '🎵' },
-  { key: 'merging', label: '合併', icon: '🎬' },
+  { key: 'merging', label: '擷取', icon: '🎬' },
 ];
 
 const currentStageIndex = computed(() => {
@@ -97,6 +97,7 @@ const currentStageIndex = computed(() => {
 <style scoped>
 .progress-bar-container {
   padding: 1rem 0;
+  width: 100%;
 }
 
 .main-progress {

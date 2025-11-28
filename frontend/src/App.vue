@@ -68,8 +68,9 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app">
-    <header class="header">
+  <div class="app" :class="{ 'full-screen': currentJob?.status === 'completed' }">
+    <!-- 標題區 - 只在沒有任務或處理中時顯示 -->
+    <header v-if="!currentJob || currentJob.status !== 'completed'" class="header">
       <h1>人聲去除服務</h1>
       <p>上傳影片或貼上 YouTube 網址，自動去除人聲產生伴奏</p>
     </header>
@@ -102,7 +103,8 @@ onUnmounted(() => {
       </div>
     </main>
 
-    <footer class="footer">
+    <!-- Footer - 只在沒有任務或處理中時顯示 -->
+    <footer v-if="!currentJob || currentJob.status !== 'completed'" class="footer">
       <p>結果保留 24 小時，每小時最多 12 次請求</p>
     </footer>
   </div>
@@ -125,6 +127,21 @@ body {
   max-width: 800px;
   margin: 0 auto;
   padding: 2rem;
+}
+
+.app.full-screen {
+  max-width: 100%;
+  padding: 1rem;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app.full-screen .main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .header {
@@ -169,9 +186,15 @@ body {
   font-size: 1rem;
 }
 
-.input-section,
-.result-section {
+.input-section {
   min-height: 200px;
+}
+
+.result-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .footer {

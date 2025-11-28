@@ -148,43 +148,57 @@ class VocalSeparator:
         output_path.mkdir(parents=True, exist_ok=True)
 
         # Demucs output order: drums, bass, other, vocals
-        # We want vocals and background (drums + bass + other)
-        vocals = sources[0, 3]  # vocals
-        background = sources[0, 0] + sources[0, 1] + sources[0, 2]  # drums + bass + other
+        track_names = ["drums", "bass", "other", "vocals"]
+        track_tensors = {
+            "drums": sources[0, 0],
+            "bass": sources[0, 1],
+            "other": sources[0, 2],
+            "vocals": sources[0, 3],
+        }
+
+        # 向後相容：計算 background (drums + bass + other)
+        background = sources[0, 0] + sources[0, 1] + sources[0, 2]
 
         # Resample back to original rate if needed
         if sr != self.model.samplerate:
             import torchaudio
             resampler = torchaudio.transforms.Resample(self.model.samplerate, sr)
-            vocals = resampler(vocals.cpu())
+            for name in track_names:
+                track_tensors[name] = resampler(track_tensors[name].cpu())
             background = resampler(background.cpu())
         else:
-            vocals = vocals.cpu()
+            for name in track_names:
+                track_tensors[name] = track_tensors[name].cpu()
             background = background.cpu()
 
-        # Save files using soundfile
-        vocals_path = output_path / "vocals.wav"
+        # 儲存四軌檔案
+        track_paths = {}
+        progress_base = 78
+        progress_step = 4  # 每軌約 4%
+
+        for i, name in enumerate(track_names):
+            if progress_callback:
+                progress_callback(progress_base + i * progress_step, f"儲存 {name} 軌道...")
+            track_path = output_path / f"{name}.wav"
+            track_np = track_tensors[name].numpy().T
+            sf.write(str(track_path), track_np, sr)
+            track_paths[name] = str(track_path)
+
+        # 向後相容：儲存 background.wav
+        if progress_callback:
+            progress_callback(95, "儲存伴奏軌道...")
         background_path = output_path / "background.wav"
-
-        # Convert to numpy and transpose (channels, samples) -> (samples, channels)
-        vocals_np = vocals.numpy().T
         background_np = background.numpy().T
-
-        if progress_callback:
-            progress_callback(85, "儲存人聲軌道...")
-        sf.write(str(vocals_path), vocals_np, sr)
-
-        if progress_callback:
-            progress_callback(92, "儲存伴奏軌道...")
         sf.write(str(background_path), background_np, sr)
 
         if progress_callback:
             progress_callback(100, "分離完成")
 
         return {
-            "vocals": str(vocals_path),
+            "vocals": track_paths["vocals"],
             "background": str(background_path),
-            "sample_rate": sr
+            "sample_rate": sr,
+            "tracks": track_paths,  # 新增：四軌路徑
         }
 
 

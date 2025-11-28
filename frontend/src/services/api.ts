@@ -3,6 +3,7 @@ const API_BASE = '/api/v1';
 export interface Job {
   id: string;
   source_type: 'youtube' | 'upload';
+  source_title: string | null;
   status: 'pending' | 'downloading' | 'separating' | 'merging' | 'completed' | 'failed';
   progress: number;
   current_stage: string;
@@ -10,6 +11,8 @@ export interface Job {
   created_at: string;
   expires_at: string;
 }
+
+export type OutputFormat = 'mp4' | 'mp3' | 'm4a' | 'wav';
 
 export interface Result {
   original_duration: number;
@@ -31,6 +34,24 @@ export interface HealthStatus {
   redis: boolean;
   storage: boolean;
   version: string;
+}
+
+export interface MixRequest {
+  drums_volume: number;
+  bass_volume: number;
+  other_volume: number;
+  vocals_volume: number;
+  pitch_shift: number;
+  output_format: OutputFormat;
+}
+
+export interface MixStatusResponse {
+  mix_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  progress: number;
+  download_url: string | null;
+  cached: boolean;
+  error_message: string | null;
 }
 
 class ApiService {
@@ -95,6 +116,21 @@ class ApiService {
 
   async healthCheck(): Promise<HealthStatus> {
     return this.request<HealthStatus>('/health');
+  }
+
+  async createMix(jobId: string, settings: MixRequest): Promise<MixStatusResponse> {
+    return this.request<MixStatusResponse>(`/jobs/${jobId}/mix`, {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+  }
+
+  async getMixStatus(jobId: string, mixId: string): Promise<MixStatusResponse> {
+    return this.request<MixStatusResponse>(`/jobs/${jobId}/mix/${mixId}`);
+  }
+
+  getMixDownloadUrl(jobId: string, mixId: string): string {
+    return `${API_BASE}/jobs/${jobId}/mix/${mixId}/download`;
   }
 }
 

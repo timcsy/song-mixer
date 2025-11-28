@@ -17,8 +17,35 @@ class JobStatus(str, Enum):
     DOWNLOADING = "downloading"
     SEPARATING = "separating"
     MERGING = "merging"
+    MIXING = "mixing"  # 新增：混音處理中
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class OutputFormat(str, Enum):
+    """輸出格式"""
+    MP4 = "mp4"   # 影片 + 音頻
+    MP3 = "mp3"   # 純音頻 (lossy)
+    M4A = "m4a"   # 純音頻 (AAC)
+    WAV = "wav"   # 純音頻 (lossless)
+
+
+class TrackPaths(BaseModel):
+    """分離後的音軌檔案路徑"""
+    drums: Optional[str] = None
+    bass: Optional[str] = None
+    other: Optional[str] = None
+    vocals: Optional[str] = None
+
+
+class MixSettings(BaseModel):
+    """混音設定"""
+    drums_volume: float = Field(1.0, ge=0.0, le=2.0)
+    bass_volume: float = Field(1.0, ge=0.0, le=2.0)
+    other_volume: float = Field(1.0, ge=0.0, le=2.0)
+    vocals_volume: float = Field(0.0, ge=0.0, le=2.0)  # 預設關閉人聲
+    pitch_shift: int = Field(0, ge=-12, le=12)
+    output_format: OutputFormat = OutputFormat.MP4
 
 
 class Job(BaseModel):
@@ -41,6 +68,9 @@ class Job(BaseModel):
     expires_at: datetime = Field(
         default_factory=lambda: datetime.utcnow() + timedelta(hours=24)
     )
+    # 進階音軌控制功能
+    track_paths: Optional[TrackPaths] = None
+    sample_rate: Optional[int] = None
 
     def update_status(self, status: JobStatus, progress: int = None, stage: str = None):
         """更新任務狀態"""

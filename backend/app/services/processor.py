@@ -6,7 +6,7 @@ import logging
 from typing import Optional
 
 from app.core.config import get_settings
-from app.models.job import Job, JobStatus, SourceType
+from app.models.job import Job, JobStatus, SourceType, TrackPaths
 from app.services.job_manager import get_job_manager
 from app.services.local_storage import get_local_storage
 from app.services.separator import get_separator
@@ -105,6 +105,20 @@ def _process_youtube_job(job: Job):
 
         background_audio = separation_result["background"]
 
+        # === 階段 3.5: 複製四軌到結果目錄 ===
+        track_paths = {}
+        if "tracks" in separation_result:
+            for track_name, track_src in separation_result["tracks"].items():
+                track_dst = storage.get_result_path(job.id, f"{track_name}.wav")
+                shutil.copy2(track_src, str(track_dst))
+                track_paths[track_name] = str(track_dst)
+
+            job_manager.update_job(
+                job.id,
+                track_paths=TrackPaths(**track_paths),
+                sample_rate=separation_result.get("sample_rate")
+            )
+
         # === 階段 4: 合併影片 ===
         job_manager.update_progress(job.id, 70, "合併影片中...", JobStatus.MERGING)
 
@@ -179,6 +193,20 @@ def _process_upload_job(job: Job):
         )
 
         background_audio = separation_result["background"]
+
+        # === 階段 3.5: 複製四軌到結果目錄 ===
+        track_paths = {}
+        if "tracks" in separation_result:
+            for track_name, track_src in separation_result["tracks"].items():
+                track_dst = storage.get_result_path(job.id, f"{track_name}.wav")
+                shutil.copy2(track_src, str(track_dst))
+                track_paths[track_name] = str(track_dst)
+
+            job_manager.update_job(
+                job.id,
+                track_paths=TrackPaths(**track_paths),
+                sample_rate=separation_result.get("sample_rate")
+            )
 
         # === 階段 4: 合併影片 ===
         job_manager.update_progress(job.id, 70, "合併影片中...", JobStatus.MERGING)
