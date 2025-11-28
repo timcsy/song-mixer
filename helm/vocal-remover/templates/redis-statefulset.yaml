@@ -30,6 +30,11 @@ spec:
           volumeMounts:
             - name: redis-data
               mountPath: /data
+      {{- if not .Values.redis.persistence.enabled }}
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+      {{- end }}
   {{- if .Values.redis.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
@@ -42,9 +47,5 @@ spec:
         resources:
           requests:
             storage: {{ .Values.redis.persistence.size }}
-  {{- else }}
-      volumes:
-        - name: redis-data
-          emptyDir: {}
   {{- end }}
 {{- end }}

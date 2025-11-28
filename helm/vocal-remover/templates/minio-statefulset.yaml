@@ -50,6 +50,11 @@ spec:
           volumeMounts:
             - name: minio-data
               mountPath: /data
+      {{- if not .Values.minio.persistence.enabled }}
+      volumes:
+        - name: minio-data
+          emptyDir: {}
+      {{- end }}
   {{- if .Values.minio.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
@@ -62,9 +67,5 @@ spec:
         resources:
           requests:
             storage: {{ .Values.minio.persistence.size }}
-  {{- else }}
-      volumes:
-        - name: minio-data
-          emptyDir: {}
   {{- end }}
 {{- end }}

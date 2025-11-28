@@ -53,7 +53,7 @@ frontend:
       memory: "64Mi"
       cpu: "100m"
 
-# Redis 設定
+# Redis 設定（停用持久化以節省 Block Storage 費用）
 redis:
   enabled: true
   resources:
@@ -64,11 +64,9 @@ redis:
       memory: "64Mi"
       cpu: "100m"
   persistence:
-    enabled: true
-    size: 1Gi
-    storageClass: "vultr-block-storage"
+    enabled: false
 
-# MinIO 設定
+# MinIO 設定（停用持久化以節省 Block Storage 費用）
 minio:
   enabled: true
   resources:
@@ -79,9 +77,7 @@ minio:
       memory: "256Mi"
       cpu: "200m"
   persistence:
-    enabled: true
-    size: 10Gi
-    storageClass: "vultr-block-storage"
+    enabled: false
   auth:
     accessKey: "minioadmin"
     secretKey: "vocal-remover-secret-2024"
