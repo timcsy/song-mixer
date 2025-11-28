@@ -35,13 +35,9 @@ build/
 docs/
 specs/
 
-# Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
-
-# Kubernetes
-k8s/
+# Claude/Specify
+.claude/
+.specify/
 
 # OS
 .DS_Store
