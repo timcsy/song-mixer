@@ -24,12 +24,13 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 3600  # 1 hour
 
     # File constraints
-    max_file_size_mb: int = 500
-    max_video_duration_seconds: int = 600  # 10 minutes
+    max_upload_size: int = 524288000  # 500MB in bytes
+    max_video_duration: int = 600  # 10 minutes in seconds
     result_expiry_hours: int = 24
+    job_timeout_minutes: int = 30
 
     # Processing
-    device: str = "cuda"  # cuda or cpu
+    device: str = "cpu"  # cuda or cpu
 
     class Config:
         env_file = ".env"

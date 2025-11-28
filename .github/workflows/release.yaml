@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Update Chart version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.VERSION }}/" helm/vocal-remover/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.VERSION }}\"/" helm/vocal-remover/Chart.yaml
+
+      - name: Package Helm chart
+        run: |
+          helm package helm/vocal-remover --destination ./release
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            release/*.tgz
+          generate_release_notes: true
+          body: |
+            ## 🎤 人聲去除服務 ${{ steps.version.outputs.VERSION }}
+
+            ### Docker Images
+            ```bash
+            # API (也用於 Worker)
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}-api:${{ steps.version.outputs.VERSION }}
+
+            # Frontend
+            docker pull ${{ env.REGISTRY }}/${{ github.repository }}-frontend:${{ steps.version.outputs.VERSION }}
+            ```
+
+            ### Helm 部署
+            ```bash
+            helm install vocal-remover ./vocal-remover-${{ steps.version.outputs.VERSION }}.tgz \
+              --set api.image.repository=${{ env.REGISTRY }}/${{ github.repository }}-api \
+              --set api.image.tag=${{ steps.version.outputs.VERSION }} \
+              --set worker.image.repository=${{ env.REGISTRY }}/${{ github.repository }}-api \
+              --set worker.image.tag=${{ steps.version.outputs.VERSION }} \
+              --set frontend.image.repository=${{ env.REGISTRY }}/${{ github.repository }}-frontend \
+              --set frontend.image.tag=${{ steps.version.outputs.VERSION }}
+            ```
+
+            ### 本地 Docker 執行
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/timcsy/vocal-remover/main/run.sh | bash
+            ```

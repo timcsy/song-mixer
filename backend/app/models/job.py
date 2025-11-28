@@ -27,6 +27,7 @@ class Job(BaseModel):
     source_type: SourceType
     source_url: Optional[str] = None
     source_filename: Optional[str] = None
+    source_title: Optional[str] = None  # 原始影片/檔案標題
     status: JobStatus = JobStatus.PENDING
     progress: int = Field(default=0, ge=0, le=100)
     current_stage: Optional[str] = None

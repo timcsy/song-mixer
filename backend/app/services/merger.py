@@ -1,6 +1,8 @@
 import os
+import re
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -60,6 +62,71 @@ class VideoMerger:
             "has_audio": has_audio
         }
 
+    def _run_ffmpeg_with_progress(
+        self,
+        cmd: list,
+        duration: float,
+        progress_callback: Optional[Callable[[int, str], None]],
+        stage_name: str
+    ) -> subprocess.CompletedProcess:
+        """
+        執行 FFmpeg 並回報進度
+
+        Args:
+            cmd: FFmpeg 命令
+            duration: 影片總時長（秒）
+            progress_callback: 進度回調
+            stage_name: 階段名稱
+
+        Returns:
+            執行結果
+        """
+        if not progress_callback or duration <= 0:
+            # 無需進度回報，直接執行
+            return subprocess.run(cmd, capture_output=True, text=True)
+
+        # 使用 -progress pipe:1 來取得進度資訊
+        cmd_with_progress = cmd.copy()
+        # 在 -y 之前插入進度選項
+        try:
+            y_index = cmd_with_progress.index("-y")
+            cmd_with_progress.insert(y_index, "-progress")
+            cmd_with_progress.insert(y_index + 1, "pipe:1")
+            cmd_with_progress.insert(y_index + 2, "-stats_period")
+            cmd_with_progress.insert(y_index + 3, "0.5")
+        except ValueError:
+            cmd_with_progress.extend(["-progress", "pipe:1", "-stats_period", "0.5"])
+
+        process = subprocess.Popen(
+            cmd_with_progress,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+
+        # 讀取進度
+        current_time = 0
+        while True:
+            line = process.stdout.readline()
+            if not line and process.poll() is not None:
+                break
+
+            if line.startswith("out_time_ms="):
+                try:
+                    time_ms = int(line.split("=")[1].strip())
+                    current_time = time_ms / 1000000  # 轉換為秒
+                    progress = min(int((current_time / duration) * 100), 99)
+                    elapsed_str = f"{int(current_time // 60)}:{int(current_time % 60):02d}"
+                    total_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+                    progress_callback(progress, f"{stage_name} {elapsed_str}/{total_str}")
+                except (ValueError, IndexError):
+                    pass
+
+        stderr = process.stderr.read()
+        returncode = process.wait()
+
+        return subprocess.CompletedProcess(cmd, returncode, "", stderr)
+
     def extract_audio(
         self,
         video_path: str,
@@ -78,7 +145,15 @@ class VideoMerger:
             輸出檔案路徑
         """
         if progress_callback:
-            progress_callback(0, "提取音頻中...")
+            progress_callback(0, "取得影片資訊中...")
+
+        # 先取得影片時長
+        video_info = self.get_video_info(video_path)
+        duration = video_info.get("duration", 0)
+
+        if progress_callback:
+            duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+            progress_callback(5, f"開始提取音頻 (長度: {duration_str})...")
 
         cmd = [
             self.ffmpeg_path,
@@ -91,7 +166,7 @@ class VideoMerger:
             output_path
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = self._run_ffmpeg_with_progress(cmd, duration, progress_callback, "提取音頻")
         if result.returncode != 0:
             raise RuntimeError(f"音頻提取失敗: {result.stderr}")
 
@@ -120,10 +195,18 @@ class VideoMerger:
             輸出檔案路徑
         """
         if progress_callback:
-            progress_callback(0, "合併影片中...")
+            progress_callback(0, "取得影片資訊中...")
+
+        # 先取得影片時長
+        video_info = self.get_video_info(video_path)
+        duration = video_info.get("duration", 0)
 
         # 確保輸出目錄存在
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        if progress_callback:
+            duration_str = f"{int(duration // 60)}:{int(duration % 60):02d}"
+            progress_callback(5, f"開始合併影片 (長度: {duration_str})...")
 
         cmd = [
             self.ffmpeg_path,
@@ -139,12 +222,15 @@ class VideoMerger:
             output_path
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = self._run_ffmpeg_with_progress(cmd, duration, progress_callback, "合併影片")
         if result.returncode != 0:
             raise RuntimeError(f"影片合併失敗: {result.stderr}")
 
         if progress_callback:
-            progress_callback(100, "合併完成")
+            # 取得輸出檔案大小
+            output_size = os.path.getsize(output_path) if os.path.exists(output_path) else 0
+            size_mb = output_size / (1024 * 1024)
+            progress_callback(100, f"合併完成 (檔案大小: {size_mb:.1f}MB)")
 
         return output_path
 

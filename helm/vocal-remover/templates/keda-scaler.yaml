@@ -1,0 +1,21 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "vocal-remover.fullname" . }}-worker-scaler
+  labels:
+    {{- include "vocal-remover.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "vocal-remover.fullname" . }}-worker
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  triggers:
+    - type: redis
+      metadata:
+        address: {{ include "vocal-remover.fullname" . }}-redis:6379
+        listName: rq:queue:default
+        listLength: {{ .Values.keda.listLength | quote }}
+{{- end }}

@@ -102,6 +102,11 @@ class RateLimiter:
         return ttl if ttl > 0 else None
 
 
+class RateLimitExceeded(Exception):
+    """頻率限制超過例外"""
+    pass
+
+
 # Global instance
 _rate_limiter: Optional[RateLimiter] = None
 
@@ -112,3 +117,20 @@ def get_rate_limiter() -> RateLimiter:
     if _rate_limiter is None:
         _rate_limiter = RateLimiter()
     return _rate_limiter
+
+
+def check_rate_limit(client_ip: str) -> None:
+    """
+    檢查頻率限制
+
+    Args:
+        client_ip: 客戶端 IP
+
+    Raises:
+        RateLimitExceeded: 當超過頻率限制時
+    """
+    limiter = get_rate_limiter()
+    allowed, remaining = limiter.check_rate_limit(client_ip)
+    if not allowed:
+        reset_time = limiter.get_reset_time(client_ip)
+        raise RateLimitExceeded(f"請求次數超過限制，請於 {reset_time} 秒後再試")

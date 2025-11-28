@@ -42,9 +42,7 @@ const progressText = computed(() => {
 });
 
 const downloadUrl = computed(() => {
-  if (props.job.result?.download_url) {
-    return props.job.result.download_url;
-  }
+  // 總是使用 API 下載端點，避免 MinIO 內部 URL 問題
   return api.getDownloadUrl(props.job.id);
 });
 

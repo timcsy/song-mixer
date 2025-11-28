@@ -1,0 +1,27 @@
+🎤 人聲去除服務已部署成功！
+
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+  {{- if $host.host }}
+  訪問網址: http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}
+  {{- else }}
+  請透過 Ingress Controller 的 IP 或 LoadBalancer 訪問
+  {{- end }}
+{{- end }}
+{{- else }}
+  執行以下命令進行端口轉發:
+  kubectl port-forward svc/{{ include "vocal-remover.fullname" . }}-frontend 8080:80 -n {{ .Release.Namespace }}
+  然後訪問: http://localhost:8080
+{{- end }}
+
+查看服務狀態:
+  kubectl get pods -n {{ .Release.Namespace }}
+  kubectl get svc -n {{ .Release.Namespace }}
+
+查看日誌:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=api -f
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=worker -f
+
+{{- if .Values.worker.gpu.enabled }}
+注意: Worker 需要 GPU 節點才能運行。確保你的集群有 NVIDIA GPU 支援。
+{{- end }}

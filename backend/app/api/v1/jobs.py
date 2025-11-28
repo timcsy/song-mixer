@@ -1,10 +1,12 @@
 import os
+import re
 import tempfile
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from pydantic import BaseModel, HttpUrl
 
 from app.core.config import get_settings
@@ -31,8 +33,8 @@ class JobResponse(BaseModel):
     source_type: SourceType
     status: JobStatus
     progress: int
-    current_stage: str
-    error_message: Optional[str]
+    current_stage: Optional[str] = None
+    error_message: Optional[str] = None
     created_at: datetime
     expires_at: datetime
 
@@ -269,7 +271,7 @@ async def download_result(job_id: str):
     """
     下載處理結果
 
-    重新導向至下載連結
+    直接串流檔案給用戶下載
     """
     job = get_job_from_redis(job_id)
     if not job:
@@ -291,6 +293,35 @@ async def download_result(job_id: str):
         )
 
     storage = get_storage_service()
-    download_url = storage.get_presigned_url(job.result_key)
 
-    return RedirectResponse(url=download_url, status_code=302)
+    # 串流下載檔案
+    def file_iterator():
+        response = storage.client.get_object(Bucket=storage.bucket, Key=job.result_key)
+        body = response['Body']
+        for chunk in body.iter_chunks(chunk_size=32 * 1024):  # 32KB chunks
+            yield chunk
+        body.close()
+
+    # 取得檔案大小
+    file_size = storage.get_file_size(job.result_key)
+
+    # 設定檔案名稱 - 使用原始標題
+    if job.source_title:
+        # 清理檔名中的特殊字元
+        safe_title = re.sub(r'[<>:"/\\|?*]', '_', job.source_title)
+        safe_title = safe_title.strip()[:100]  # 限制長度
+        filename = f"{safe_title}_伴奏.mp4"
+    else:
+        filename = f"karaoke_{job_id}.mp4"
+
+    # 使用 RFC 5987 編碼處理非 ASCII 字元
+    filename_encoded = quote(filename, safe='')
+
+    return StreamingResponse(
+        file_iterator(),
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename_encoded}",
+            "Content-Length": str(file_size)
+        }
+    )

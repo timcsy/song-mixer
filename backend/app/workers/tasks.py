@@ -124,14 +124,16 @@ def process_youtube_job(job_id: str):
             progress_callback=download_progress
         )
 
-        # 取得影片時長
+        # 取得影片資訊（標題、時長）
         info = downloader.get_video_info(job.source_url)
         original_duration = info.get('duration', 0)
+        video_title = info.get('title', '')
 
-        # 更新 job 的時長資訊
+        # 更新 job 的時長和標題資訊
         job = get_job_from_redis(job_id)
         if job:
             job.original_duration = original_duration
+            job.source_title = video_title
             save_job_to_redis(job)
 
         # === 階段 2: 提取音頻 ===
@@ -231,10 +233,13 @@ def process_upload_job(job_id: str):
         video_info = merger.get_video_info(video_path)
         original_duration = int(video_info.get('duration', 0))
 
-        # 更新 job 的時長資訊
+        # 更新 job 的時長和標題資訊
         job = get_job_from_redis(job_id)
         if job:
             job.original_duration = original_duration
+            # 使用上傳檔案名稱作為標題（去掉副檔名）
+            if job.source_filename:
+                job.source_title = os.path.splitext(job.source_filename)[0]
             save_job_to_redis(job)
 
         # === 階段 3: 分離人聲 ===

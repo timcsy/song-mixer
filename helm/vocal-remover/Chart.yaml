@@ -1,0 +1,13 @@
+apiVersion: v2
+name: vocal-remover
+description: 人聲去除服務 - 從影片中分離人聲產生伴奏
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - vocal-remover
+  - karaoke
+  - demucs
+  - audio-separation
+maintainers:
+  - name: timcsy

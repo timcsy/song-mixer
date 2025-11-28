@@ -64,3 +64,9 @@ htmlcov/
 *.temp
 tmp/
 temp/
+
+# Docker local compose
+docker-compose.local.yaml
+
+# Helm
+*.tgz

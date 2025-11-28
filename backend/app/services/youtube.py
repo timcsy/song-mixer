@@ -99,20 +99,36 @@ class YouTubeDownloader:
         output_template = str(output_path / '%(id)s.%(ext)s')
 
         def progress_hook(d):
-            if progress_callback and d['status'] == 'downloading':
-                total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-                downloaded = d.get('downloaded_bytes', 0)
-                if total > 0:
-                    percent = int((downloaded / total) * 100)
-                    progress_callback(percent, "下載中...")
+            if progress_callback:
+                if d['status'] == 'downloading':
+                    total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                    downloaded = d.get('downloaded_bytes', 0)
+                    speed = d.get('speed', 0)
+
+                    if total > 0:
+                        percent = int((downloaded / total) * 100)
+                        # 格式化檔案大小
+                        dl_mb = downloaded / (1024 * 1024)
+                        total_mb = total / (1024 * 1024)
+                        # 格式化速度
+                        if speed:
+                            speed_mb = speed / (1024 * 1024)
+                            stage = f"下載中 {dl_mb:.1f}/{total_mb:.1f}MB ({speed_mb:.1f}MB/s)"
+                        else:
+                            stage = f"下載中 {dl_mb:.1f}/{total_mb:.1f}MB"
+                        progress_callback(percent, stage)
+                elif d['status'] == 'finished':
+                    progress_callback(95, "下載完成，處理中...")
 
         ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'format': 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/bestvideo+bestaudio/best',
             'outtmpl': output_template,
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': False,
+            'no_warnings': False,
             'progress_hooks': [progress_hook],
             'merge_output_format': 'mp4',
+            # 避免下載 mhtml 等非影片格式
+            'ignore_no_formats_error': False,
         }
 
         if progress_callback:
@@ -122,14 +138,33 @@ class YouTubeDownloader:
             try:
                 info = ydl.extract_info(url, download=True)
                 video_id = info['id']
-                # 找到下載的檔案
-                for ext in ['mp4', 'mkv', 'webm']:
+
+                # 方法 1: 直接從 info 取得檔案路徑
+                if 'requested_downloads' in info and info['requested_downloads']:
+                    filepath = info['requested_downloads'][0].get('filepath')
+                    if filepath and os.path.exists(filepath):
+                        if progress_callback:
+                            progress_callback(100, "下載完成")
+                        return filepath
+
+                # 方法 2: 搜尋輸出目錄中的檔案
+                for ext in ['mp4', 'mkv', 'webm', 'm4a', 'mp3']:
                     filepath = output_path / f"{video_id}.{ext}"
                     if filepath.exists():
                         if progress_callback:
                             progress_callback(100, "下載完成")
                         return str(filepath)
-                raise RuntimeError("下載後找不到檔案")
+
+                # 方法 3: 列出目錄中所有檔案找到最新的
+                files = list(output_path.glob('*.*'))
+                if files:
+                    # 按修改時間排序，取最新的
+                    newest = max(files, key=lambda f: f.stat().st_mtime)
+                    if progress_callback:
+                        progress_callback(100, "下載完成")
+                    return str(newest)
+
+                raise RuntimeError(f"下載後找不到檔案，目錄: {output_path}")
             except yt_dlp.DownloadError as e:
                 raise RuntimeError(f"下載失敗: {str(e)}")
 
