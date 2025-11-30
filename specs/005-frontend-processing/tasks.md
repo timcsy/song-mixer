@@ -94,15 +94,15 @@
 
 ### Tests for User Story 2 ⚠️
 
-- [ ] T029 [P] [US2] 建立歌曲列表元件測試 frontend/tests/components/SongList.test.ts
+- [X] T029 [P] [US2] 建立歌曲列表元件測試 frontend/tests/components/SongList.test.ts
 
 ### Implementation for User Story 2
 
-- [ ] T030 [US2] 修改 frontend/src/components/SongList.vue 從 IndexedDB 載入歌曲列表
-- [ ] T031 [US2] 加入歌曲刪除功能（含確認對話框）
-- [ ] T032 [US2] 加入 IndexedDB 儲存使用量顯示
-- [ ] T033 [US2] 加入儲存空間已滿時的錯誤提示
-- [ ] T034 [US2] 執行 US2 測試確保全部通過
+- [X] T030 [US2] 修改 frontend/src/components/SongList.vue 從 IndexedDB 載入歌曲列表
+- [X] T031 [US2] 加入歌曲刪除功能（含確認對話框）
+- [X] T032 [US2] 加入 IndexedDB 儲存使用量顯示
+- [X] T033 [US2] 加入儲存空間已滿時的錯誤提示
+- [X] T034 [US2] 執行 US2 測試確保全部通過
 
 **Checkpoint**: User Stories 1 & 2 完成 - 可獨立測試歌曲管理功能
 

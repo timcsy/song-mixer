@@ -85,6 +85,7 @@ vi.mock('@/services/storageService', () => ({
     getSong: vi.fn().mockResolvedValue(null),
     getAllSongs: vi.fn().mockResolvedValue([]),
     deleteSong: vi.fn().mockResolvedValue(undefined),
+    getStorageUsage: vi.fn().mockResolvedValue({ used: 0, quota: 1000000000 }), // 1GB
   },
 }))
 

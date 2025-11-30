@@ -158,6 +158,18 @@ async function processUpload(
     // 確保儲存服務已初始化
     await storageService.init()
 
+    // 檢查儲存空間（預估需要約 200MB）
+    const storage = await storageService.getStorageUsage()
+    const estimatedSize = file.size * 10 // 粗略估計：原始檔案 + 4 軌音訊
+    const remainingSpace = storage.quota - storage.used
+    if (remainingSpace < estimatedSize && storage.quota > 0) {
+      throw new Error(
+        `儲存空間不足。需要約 ${Math.ceil(estimatedSize / 1024 / 1024)} MB，` +
+        `剩餘 ${Math.ceil(remainingSpace / 1024 / 1024)} MB。` +
+        `請刪除一些歌曲後再試。`
+      )
+    }
+
     // 階段 1：提取音頻
     updateState({ stage: 'extracting', progress: 0 }, options)
     checkCancelled()
