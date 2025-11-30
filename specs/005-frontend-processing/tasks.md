@@ -166,12 +166,12 @@
 
 **Purpose**: 跨功能優化與清理
 
-- [ ] T054 移除舊的後端處理程式碼（job_manager.py, processor.py, separator.py 等）
-- [ ] T055 [P] 更新 Dockerfile 移除 Demucs 模型依賴（減小映像大小）
-- [ ] T056 [P] 更新 frontend/package.json 移除不再需要的依賴
-- [ ] T057 驗證 quickstart.md 所有步驟正確
+- [X] T054 移除舊的後端處理程式碼（job_manager.py, processor.py, separator.py 等）
+- [X] T055 [P] 更新 Dockerfile 移除 Demucs 模型依賴（減小映像大小）
+- [X] T056 [P] 更新 frontend/package.json 移除不再需要的依賴
+- [X] T057 驗證 quickstart.md 所有步驟正確
 - [ ] T058 效能測試：確認 3 分鐘歌曲處理時間 ≤5 分鐘
-- [ ] T059 執行完整測試套件確保全部通過（npm run test && python -m pytest）
+- [X] T059 執行完整測試套件確保全部通過（npm run test && python -m pytest）
 
 ---
 

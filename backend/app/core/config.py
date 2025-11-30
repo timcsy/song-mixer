@@ -1,3 +1,9 @@
+"""
+Configuration settings
+Feature: 005-frontend-processing
+
+後端僅提供 YouTube 下載和 FFmpeg 處理代理
+"""
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -9,20 +15,13 @@ class Settings(BaseSettings):
     app_name: str = "人聲去除服務"
     debug: bool = False
 
-    # Local Storage
+    # Local Storage (for temp files)
     data_dir: str = "/data"
     uploads_dir: str = "/data/uploads"
     results_dir: str = "/data/results"
 
-    # File constraints
+    # YouTube constraints
     max_video_duration: int = 600  # 10 minutes in seconds
-    job_timeout_minutes: int = 30
-
-    # Concurrency
-    max_concurrent_jobs: int = 2
-
-    # Processing
-    device: str = "cpu"  # cuda or cpu
 
     class Config:
         env_file = ".env"
