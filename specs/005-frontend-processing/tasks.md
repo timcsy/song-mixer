@@ -116,17 +116,17 @@
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T035 [P] [US3] 建立下載功能整合測試 frontend/tests/components/ResultView.download.test.ts
+- [X] T035 [P] [US3] 建立下載功能整合測試 frontend/tests/components/ResultView.download.test.ts
 
 ### Implementation for User Story 3
 
-- [ ] T036 [US3] 修改 frontend/src/components/ResultView.vue 整合新的下載邏輯
-- [ ] T037 [US3] 實作 WAV 下載（使用 audioExportService.mixToWav）
-- [ ] T038 [US3] 實作 MP3 下載（使用 audioExportService.mixToMp3 + lamejs）
-- [ ] T039 [US3] 實作 MP4/M4A 下載（純靜態模式：ffmpegService.mergeVideoAudio）
-- [ ] T040 [US3] 實作 MP4/M4A 下載（Docker 模式：後端 FFmpeg API）
-- [ ] T041 [US3] 根據後端可用性自動選擇下載方式
-- [ ] T042 [US3] 執行 US3 測試確保全部通過
+- [X] T036 [US3] 修改 frontend/src/components/ResultView.vue 整合新的下載邏輯
+- [X] T037 [US3] 實作 WAV 下載（使用 audioExportService.mixToWav）
+- [X] T038 [US3] 實作 MP3 下載（使用 audioExportService.mixToMp3 + lamejs）
+- [X] T039 [US3] 實作 MP4/M4A 下載（純靜態模式：ffmpegService.mergeVideoAudio）
+- [X] T040 [US3] 實作 MP4/M4A 下載（Docker 模式：後端 FFmpeg API）
+- [X] T041 [US3] 根據後端可用性自動選擇下載方式
+- [X] T042 [US3] 執行 US3 測試確保全部通過
 
 **Checkpoint**: User Stories 1, 2 & 3 完成 - 純靜態部署功能完整
 

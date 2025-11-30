@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { api, type JobWithResult, type MixRequest, type OutputFormat } from '../services/api';
+import { ref, computed, onMounted } from 'vue';
+import { api, getBackendCapabilities, type JobWithResult, type OutputFormat } from '../services/api';
+import { storageService } from '@/services/storageService';
+import { useDownload } from '@/composables/useDownload';
 import ProgressBar from './ProgressBar.vue';
 import AudioMixer from './AudioMixer/AudioMixer.vue';
+import type { SongRecord } from '@/types/storage';
 
 const props = defineProps<{
   job: JobWithResult;
@@ -15,6 +18,12 @@ const emit = defineEmits<{
 const isCompleted = computed(() => props.job.status === 'completed');
 const isFailed = computed(() => props.job.status === 'failed');
 const isProcessing = computed(() => !isCompleted.value && !isFailed.value);
+
+// 後端功能偵測
+const backend = getBackendCapabilities();
+
+// 本地歌曲資料（純靜態模式）
+const localSong = ref<SongRecord | null>(null);
 
 // Video element reference for AudioMixer sync
 const videoElement = ref<HTMLVideoElement | null>(null);
@@ -36,76 +45,87 @@ const handleMixerError = (message: string) => {
 
 // ========== 下載功能 ==========
 const selectedFormat = ref<OutputFormat>('mp4');
-const isDownloading = ref(false);
-const downloadProgress = ref(0);
-const downloadError = ref<string | null>(null);
+const { state: downloadState, startDownload: doDownload, reset: resetDownload } = useDownload();
 
-const formatOptions: { value: OutputFormat; label: string }[] = [
-  { value: 'mp4', label: 'MP4' },
-  { value: 'm4a', label: 'M4A' },
-  { value: 'mp3', label: 'MP3' },
-  { value: 'wav', label: 'WAV' },
-];
+// 可用的下載格式（純靜態模式下，沒有原始影片則不支援 MP4/M4A）
+const formatOptions = computed(() => {
+  const options: { value: OutputFormat; label: string; disabled?: boolean }[] = [
+    { value: 'wav', label: 'WAV' },
+    { value: 'mp3', label: 'MP3' },
+  ];
+
+  // MP4/M4A 需要後端 FFmpeg 或本地原始影片
+  const canExportVideo = backend.available || localSong.value?.originalVideo;
+  options.push(
+    { value: 'm4a', label: 'M4A', disabled: !canExportVideo && !backend.ffmpeg },
+    { value: 'mp4', label: 'MP4', disabled: !canExportVideo },
+  );
+
+  return options;
+});
+
+// 下載進度訊息
+const downloadStageText = computed(() => {
+  switch (downloadState.value.stage) {
+    case 'preparing': return '準備中...';
+    case 'mixing': return '混音中...';
+    case 'encoding': return '編碼中...';
+    case 'complete': return '完成';
+    default: return '';
+  }
+});
 
 const startDownload = async () => {
-  if (isDownloading.value || !audioMixerRef.value) return;
+  if (downloadState.value.isDownloading || !audioMixerRef.value) return;
 
-  isDownloading.value = true;
-  downloadProgress.value = 0;
-  downloadError.value = null;
+  // 檢查格式是否被禁用
+  const formatOpt = formatOptions.value.find(f => f.value === selectedFormat.value);
+  if (formatOpt?.disabled) {
+    return;
+  }
+
+  resetDownload();
 
   try {
-    // Get current mixer settings
     const mixer = audioMixerRef.value;
-    const mixRequest: MixRequest = {
-      drums_volume: mixer.tracks?.drums?.volume ?? 1,
-      bass_volume: mixer.tracks?.bass?.volume ?? 1,
-      other_volume: mixer.tracks?.other?.volume ?? 1,
-      vocals_volume: mixer.tracks?.vocals?.volume ?? 0,
-      pitch_shift: mixer.pitchShift ?? 0,
-      output_format: selectedFormat.value,
+    const mixerSettings = {
+      drums: mixer.tracks?.drums?.volume ?? 1,
+      bass: mixer.tracks?.bass?.volume ?? 1,
+      other: mixer.tracks?.other?.volume ?? 1,
+      vocals: mixer.tracks?.vocals?.volume ?? 0,
+      pitchShift: mixer.pitchShift ?? 0,
     };
 
-    const response = await api.createMix(props.job.id, mixRequest);
-
-    if (response.status === 'completed' && response.download_url) {
-      triggerDownload(response.download_url);
-      return;
-    }
-
-    // Poll for completion
-    const mixId = response.mix_id;
-    const pollInterval = setInterval(async () => {
-      try {
-        const status = await api.getMixStatus(props.job.id, mixId);
-        downloadProgress.value = status.progress;
-
-        if (status.status === 'completed' && status.download_url) {
-          clearInterval(pollInterval);
-          triggerDownload(status.download_url);
-        } else if (status.status === 'failed') {
-          clearInterval(pollInterval);
-          downloadError.value = status.error_message || '混音失敗';
-          isDownloading.value = false;
-        }
-      } catch {
-        clearInterval(pollInterval);
-        downloadError.value = '查詢狀態失敗';
-        isDownloading.value = false;
-      }
-    }, 1000);
-  } catch {
-    downloadError.value = '建立混音任務失敗';
-    isDownloading.value = false;
+    await doDownload({
+      jobId: backend.available ? props.job.id : undefined,
+      songId: !backend.available && localSong.value ? localSong.value.id : undefined,
+      format: selectedFormat.value,
+      mixerSettings,
+      title: props.job.source_title || '混音',
+    });
+  } catch (err) {
+    // 錯誤已經設定到 downloadState.error
   }
 };
 
-const triggerDownload = (url: string) => {
-  // 直接在新分頁開啟下載 URL，讓瀏覽器處理下載
-  // 後端已設定 Content-Disposition: attachment
-  window.open(url, '_blank');
-  isDownloading.value = false;
-};
+// 載入本地歌曲資料（純靜態模式）
+onMounted(async () => {
+  if (!backend.available) {
+    try {
+      await storageService.init();
+      const song = await storageService.getSong(props.job.id);
+      if (song) {
+        localSong.value = song;
+        // 如果沒有原始影片，預設選擇 WAV
+        if (!song.originalVideo) {
+          selectedFormat.value = 'wav';
+        }
+      }
+    } catch (err) {
+      console.warn('無法載入本地歌曲資料:', err);
+    }
+  }
+});
 
 const statusText = computed(() => {
   switch (props.job.status) {
@@ -227,13 +247,17 @@ const durationText = computed(() => {
               v-for="opt in formatOptions"
               :key="opt.value"
               class="format-option"
-              :class="{ selected: selectedFormat === opt.value }"
+              :class="{
+                selected: selectedFormat === opt.value,
+                disabled: opt.disabled
+              }"
+              :title="opt.disabled ? '此格式需要原始影片' : ''"
             >
               <input
                 type="radio"
                 :value="opt.value"
                 v-model="selectedFormat"
-                :disabled="isDownloading"
+                :disabled="downloadState.isDownloading || opt.disabled"
               />
               {{ opt.label }}
             </label>
@@ -241,16 +265,22 @@ const durationText = computed(() => {
           <button
             @click="startDownload"
             class="download-btn primary"
-            :disabled="!mixerReady || isDownloading"
+            :disabled="!mixerReady || downloadState.isDownloading"
           >
-            <span v-if="isDownloading">{{ downloadProgress }}%</span>
+            <span v-if="downloadState.isDownloading">
+              {{ downloadStageText }} {{ downloadState.progress }}%
+            </span>
             <span v-else>下載</span>
           </button>
           <button @click="emit('reset')" class="download-btn secondary">
             處理新影片
           </button>
         </div>
-        <div v-if="downloadError" class="download-error">{{ downloadError }}</div>
+        <!-- 下載進度條 -->
+        <div v-if="downloadState.isDownloading" class="download-progress-bar">
+          <div class="progress-fill" :style="{ width: `${downloadState.progress}%` }"></div>
+        </div>
+        <div v-if="downloadState.error" class="download-error">{{ downloadState.error }}</div>
       </div>
     </div>
 
@@ -471,8 +501,33 @@ h2 {
   color: white;
 }
 
+.format-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f0f0f0;
+}
+
+.format-option.disabled:hover {
+  border-color: #ddd;
+  background: #f0f0f0;
+}
+
 .format-option input {
   display: none;
+}
+
+.download-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.download-progress-bar .progress-fill {
+  height: 100%;
+  background: #4caf50;
+  transition: width 0.3s ease;
 }
 
 .download-error {
