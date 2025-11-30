@@ -19,11 +19,11 @@
 
 **Purpose**: 專案初始化與基礎結構設定
 
-- [ ] T001 安裝前端新依賴：npm install demucs-web onnxruntime-web lamejs 於 frontend/
-- [ ] T002 [P] 下載 coi-serviceworker.js 到 frontend/public/coi-serviceworker.js
-- [ ] T003 [P] 更新 frontend/index.html 引入 coi-serviceworker.js 和 ffmpeg.wasm CDN
-- [ ] T004 [P] 更新 frontend/vite.config.ts 加入 COOP/COEP headers（開發模式）
-- [ ] T005 [P] 更新 docker/nginx.conf 加入 COOP/COEP headers（Docker 模式）
+- [X] T001 安裝前端新依賴：npm install demucs-web onnxruntime-web lamejs 於 frontend/
+- [X] T002 [P] 下載 coi-serviceworker.js 到 frontend/public/coi-serviceworker.js
+- [X] T003 [P] 更新 frontend/index.html 引入 coi-serviceworker.js 和 ffmpeg.wasm CDN
+- [X] T004 [P] 更新 frontend/vite.config.ts 加入 COOP/COEP headers（開發模式）
+- [X] T005 [P] 更新 docker/nginx.conf 加入 COOP/COEP headers（Docker 模式）
 
 ---
 
@@ -37,21 +37,21 @@
 
 > **NOTE: 先寫測試，確保測試 FAIL 後再實作**
 
-- [ ] T006 [P] 建立 storageService 單元測試 frontend/tests/services/storageService.test.ts
-- [ ] T007 [P] 建立 browserCheck 單元測試 frontend/tests/utils/browserCheck.test.ts
-- [ ] T008 [P] 建立 audioExportService 單元測試 frontend/tests/services/audioExportService.test.ts
+- [X] T006 [P] 建立 storageService 單元測試 frontend/tests/services/storageService.test.ts
+- [X] T007 [P] 建立 browserCheck 單元測試 frontend/tests/utils/browserCheck.test.ts
+- [X] T008 [P] 建立 audioExportService 單元測試 frontend/tests/services/audioExportService.test.ts
 
 ### Implementation for Foundational
 
-- [ ] T009 建立型別定義檔 frontend/src/types/storage.ts（SongRecord, ProcessingState, MixerSettings 等）
-- [ ] T010 [P] 建立瀏覽器相容性檢查工具 frontend/src/utils/browserCheck.ts
-- [ ] T011 [P] 建立 IndexedDB 儲存服務 frontend/src/services/storageService.ts
-- [ ] T012 [P] 建立 demucs-web 封裝服務 frontend/src/services/demucsService.ts
-- [ ] T013 [P] 建立 ffmpeg.wasm 封裝服務 frontend/src/services/ffmpegService.ts
-- [ ] T014 [P] 建立音訊匯出服務 frontend/src/services/audioExportService.ts（WAV/MP3）
-- [ ] T015 更新 frontend/src/services/api.ts 加入後端偵測和 YouTube 代理 API
-- [ ] T016 建立 App 啟動時的瀏覽器檢查與後端偵測邏輯於 frontend/src/App.vue
-- [ ] T017 執行 Foundational 測試確保全部通過
+- [X] T009 建立型別定義檔 frontend/src/types/storage.ts（SongRecord, ProcessingState, MixerSettings 等）
+- [X] T010 [P] 建立瀏覽器相容性檢查工具 frontend/src/utils/browserCheck.ts
+- [X] T011 [P] 建立 IndexedDB 儲存服務 frontend/src/services/storageService.ts
+- [X] T012 [P] 建立 demucs-web 封裝服務 frontend/src/services/demucsService.ts
+- [X] T013 [P] 建立 ffmpeg.wasm 封裝服務 frontend/src/services/ffmpegService.ts
+- [X] T014 [P] 建立音訊匯出服務 frontend/src/services/audioExportService.ts（WAV/MP3）
+- [X] T015 更新 frontend/src/services/api.ts 加入後端偵測和 YouTube 代理 API
+- [X] T016 建立 App 啟動時的瀏覽器檢查與後端偵測邏輯於 frontend/src/App.vue
+- [X] T017 執行 Foundational 測試確保全部通過
 
 **Checkpoint**: 基礎設施就緒 - 可開始使用者故事實作
 
