@@ -9,29 +9,84 @@ import * as ort from 'onnxruntime-web'
 import { DemucsProcessor, CONSTANTS } from 'demucs-web'
 import type { SeparationResult } from '@/types/storage'
 import { stereoFloat32ToInt16Buffer, int16BufferToStereoFloat32 } from '@/utils/format'
-import { settingsService, isWebGPUSupported } from '@/services/settingsService'
 
 // 設定 ONNX Runtime WASM 檔案路徑
 // 使用 jsDelivr CDN（支援 CORS，版本須與 npm 一致）
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/'
 
 /**
- * 根據設定配置 ONNX Runtime 執行提供者
+ * 檢查瀏覽器是否支援 WebGPU
+ */
+function isWebGPUSupported(): boolean {
+  return typeof navigator !== 'undefined' && 'gpu' in navigator
+}
+
+/**
+ * 檢查是否為行動裝置
+ */
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const userAgent = navigator.userAgent || ''
+  const mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile|tablet/i
+  const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 768
+  const hasTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+  return mobileRegex.test(userAgent.toLowerCase()) || (isSmallScreen && hasTouch)
+}
+
+/**
+ * 取得裝置記憶體（GB）
+ * 僅 Chromium 瀏覽器支援，其他返回 undefined
+ */
+function getDeviceMemory(): number | undefined {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = navigator as any
+  return nav.deviceMemory
+}
+
+/**
+ * 判斷是否為低記憶體裝置
+ */
+function isLowMemoryDevice(): boolean {
+  const memory = getDeviceMemory()
+  // 4GB 以下視為低記憶體裝置
+  if (memory !== undefined && memory <= 4) {
+    return true
+  }
+  // 行動裝置預設視為低記憶體
+  return isMobileDevice()
+}
+
+/**
+ * 取得 ONNX Runtime Session Options
+ * 根據裝置類型自動調整記憶體設定
+ */
+function getSessionOptions(): Record<string, unknown> {
+  const isLowMem = isLowMemoryDevice()
+  const memory = getDeviceMemory()
+
+  if (isLowMem) {
+    console.log(`[Demucs] 偵測到低記憶體裝置 (${memory ?? '未知'} GB)，啟用記憶體優化模式`)
+    return {
+      // 關閉 CPU 記憶體競技場，避免預先分配大塊記憶體
+      enableCpuMemArena: false,
+      // 關閉記憶體模式優化，減少記憶體追蹤開銷
+      enableMemPattern: false,
+    }
+  }
+
+  console.log(`[Demucs] 裝置記憶體: ${memory ?? '未知'} GB，使用預設設定`)
+  return {}
+}
+
+/**
+ * 配置 ONNX Runtime 執行提供者
+ * 自動判斷是否使用 WebGPU
  */
 function configureOnnxRuntime(): void {
-  const useWebGPU = settingsService.getUseWebGPU()
-
-  if (useWebGPU && isWebGPUSupported()) {
-    // 啟用 WebGPU
-    console.log('[Demucs] 使用 WebGPU 加速')
+  if (isWebGPUSupported()) {
+    console.log('[Demucs] 偵測到 WebGPU 支援，使用 WebGPU 加速')
   } else {
-    // 強制使用 WASM（停用 WebGPU）
-    // 透過環境變數停用 WebGPU
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const env = ort.env as any
-    if (env.webgpu) {
-      env.webgpu.disabled = true
-    }
+    // 不支援 WebGPU，使用 WASM（CPU）模式
     console.log('[Demucs] 使用 WASM（CPU）模式')
   }
 }
@@ -83,16 +138,20 @@ class DemucsService {
    */
   private async loadModel(onDownloadProgress?: DownloadProgressCallback): Promise<void> {
     try {
-      // 根據設定配置 ONNX Runtime
+      // 配置 ONNX Runtime（自動判斷 WebGPU 支援）
       configureOnnxRuntime()
 
       // 儲存下載進度回呼
       this.downloadProgressCallback = onDownloadProgress || null
 
+      // 取得適合裝置的 session options
+      const sessionOptions = getSessionOptions()
+
       // demucs-web 沒有完整的 TypeScript 定義，使用 any 繞過
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const processorOptions: any = {
         ort,
+        sessionOptions,
         // onProgress 接收物件 { progress, currentSegment, totalSegments }
         onProgress: (progressInfo: any) => {
           // 分離進度（非下載進度）

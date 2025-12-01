@@ -37,27 +37,6 @@
         </span>
       </div>
 
-      <!-- WebGPU 設定 -->
-      <div class="settings-section">
-        <label class="setting-toggle" :class="{ disabled: !webGPUSupported }">
-          <span class="setting-label">
-            <span class="setting-icon">⚡</span>
-            WebGPU 加速
-            <span v-if="!webGPUSupported" class="not-supported">（不支援）</span>
-          </span>
-          <input
-            type="checkbox"
-            v-model="useWebGPU"
-            :disabled="!webGPUSupported"
-            @change="onWebGPUChange"
-          />
-          <span class="toggle-slider"></span>
-        </label>
-        <p class="setting-hint">
-          {{ isMobile ? '行動裝置建議關閉' : '桌面裝置建議開啟' }}
-        </p>
-      </div>
-
       <button class="btn btn-primary" @click="$emit('addSong')">
         + 新增歌曲
       </button>
@@ -85,7 +64,6 @@ import { computed, ref, onMounted, watch } from 'vue'
 import type { CompletedJob } from '@/services/api'
 import SongList from './SongList.vue'
 import { storageService } from '@/services/storageService'
-import { settingsService, isWebGPUSupported, isMobileDevice } from '@/services/settingsService'
 
 interface Props {
   isOpen: boolean
@@ -116,15 +94,6 @@ defineEmits<{
 
 const hasSelectedJobs = computed(() => props.selectedJobIds.size > 0)
 const selectedCount = computed(() => props.selectedJobIds.size)
-
-// WebGPU 設定
-const webGPUSupported = isWebGPUSupported()
-const isMobile = isMobileDevice()
-const useWebGPU = ref(settingsService.getUseWebGPU())
-
-function onWebGPUChange() {
-  settingsService.setUseWebGPU(useWebGPU.value)
-}
 
 // 儲存使用量
 const storageUsage = ref<{ used: number; quota: number } | null>(null)
@@ -296,95 +265,6 @@ watch(() => props.jobs.length, () => {
   font-size: 0.75rem;
   color: #888;
   text-align: right;
-}
-
-/* WebGPU 設定 */
-.settings-section {
-  padding: 0.75rem 0;
-  border-bottom: 1px solid #333;
-  margin-bottom: 0.5rem;
-}
-
-.setting-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  cursor: pointer;
-  position: relative;
-}
-
-.setting-toggle.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.setting-label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
-  color: #e0e0e0;
-}
-
-.setting-icon {
-  font-size: 1rem;
-}
-
-.not-supported {
-  font-size: 0.75rem;
-  color: #888;
-}
-
-.setting-toggle input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-slider {
-  width: 44px;
-  height: 24px;
-  background: #3a3a3a;
-  border-radius: 12px;
-  position: relative;
-  transition: background 0.2s;
-  flex-shrink: 0;
-}
-
-.toggle-slider::before {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #888;
-  top: 3px;
-  left: 3px;
-  transition: transform 0.2s, background 0.2s;
-}
-
-.setting-toggle input:checked + .toggle-slider {
-  background: #4a9eff;
-}
-
-.setting-toggle input:checked + .toggle-slider::before {
-  transform: translateX(20px);
-  background: #fff;
-}
-
-.setting-toggle.disabled .toggle-slider {
-  background: #2a2a2a;
-}
-
-.setting-toggle.disabled .toggle-slider::before {
-  background: #555;
-}
-
-.setting-hint {
-  margin: 0.5rem 0 0;
-  font-size: 0.75rem;
-  color: #666;
 }
 
 .drawer-overlay {
