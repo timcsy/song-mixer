@@ -1,3 +1,4 @@
+import JSZip from 'jszip'
 import type { BackendCapabilities, YouTubeInfo } from '@/types/storage'
 
 const API_BASE = '/api/v1';
@@ -160,27 +161,30 @@ export async function downloadYouTube(
   const zip = await JSZip.loadAsync(zipBuffer)
 
   // 找出影片和音訊檔案
-  let videoFile: JSZip.JSZipObject | null = null
-  let audioFile: JSZip.JSZipObject | null = null
-  let videoExt = ''
-  let audioExt = ''
+  const result: {
+    videoFile: JSZip.JSZipObject | null
+    audioFile: JSZip.JSZipObject | null
+    videoExt: string
+    audioExt: string
+  } = { videoFile: null, audioFile: null, videoExt: '', audioExt: '' }
 
   zip.forEach((relativePath, file) => {
     if (relativePath.startsWith('video.')) {
-      videoFile = file
-      videoExt = relativePath.split('.').pop() || 'mp4'
+      result.videoFile = file
+      result.videoExt = relativePath.split('.').pop() || 'mp4'
     } else if (relativePath.startsWith('audio.')) {
-      audioFile = file
-      audioExt = relativePath.split('.').pop() || 'm4a'
+      result.audioFile = file
+      result.audioExt = relativePath.split('.').pop() || 'm4a'
     }
   })
 
-  if (!videoFile || !audioFile) {
+  if (!result.videoFile || !result.audioFile) {
     throw new Error('ZIP 檔案格式錯誤')
   }
 
-  const video = await videoFile.async('arraybuffer')
-  const audio = await audioFile.async('arraybuffer')
+  const video = await result.videoFile.async('arraybuffer')
+  const audio = await result.audioFile.async('arraybuffer')
+  const { videoExt, audioExt } = result
 
   return { video, videoExt, audio, audioExt, title, duration, thumbnail }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import JSZip from 'jszip';
-import { api, getBackendCapabilities, type JobWithResult, type OutputFormat } from '../services/api';
+import { getBackendCapabilities, type JobWithResult, type OutputFormat } from '../services/api';
 import { storageService } from '@/services/storageService';
 import { useDownload } from '@/composables/useDownload';
 import { formatDuration, formatFileSize } from '@/utils/format';

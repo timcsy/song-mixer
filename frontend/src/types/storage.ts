@@ -46,6 +46,7 @@ export type ProcessingSubStage =
   | 'separating'          // 分離音軌中
   | 'saving_tracks'       // 儲存音軌
   | 'saving_video'        // 儲存影片
+  | 'merging_video'       // 合併影片與音訊
   | null
 
 /**
