@@ -99,8 +99,7 @@ const startDownload = async () => {
     };
 
     await doDownload({
-      jobId: backend.available ? props.job.id : undefined,
-      songId: !backend.available && localSong.value ? localSong.value.id : undefined,
+      songId: localSong.value?.id,
       format: selectedFormat.value,
       mixerSettings,
       title: props.job.source_title || '混音',

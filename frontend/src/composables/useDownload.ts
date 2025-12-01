@@ -3,13 +3,12 @@
  * Feature: 005-frontend-processing / User Story 3
  *
  * 統一處理 WAV/MP3/MP4/M4A 格式的下載
- * 支援純靜態模式（前端處理）和 Docker 模式（後端處理）
+ * 所有混音/編碼都在前端執行（ffmpeg.wasm）
  */
 import { ref } from 'vue'
 import { audioExportService } from '@/services/audioExportService'
 import { ffmpegService } from '@/services/ffmpegService'
 import { storageService } from '@/services/storageService'
-import { getBackendCapabilities, api, type MixRequest } from '@/services/api'
 import type { OutputFormat } from '@/types/storage'
 
 // 所有編碼都在前端執行（ffmpeg.wasm）
@@ -85,63 +84,6 @@ export function useDownload() {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
-  }
-
-  /**
-   * 使用後端 API 下載（Docker 模式）
-   */
-  async function downloadFromBackend(options: DownloadOptions): Promise<void> {
-    const { jobId, format, mixerSettings, onProgress } = options
-
-    if (!jobId) {
-      throw new Error('缺少 jobId')
-    }
-
-    updateState({ stage: 'preparing', progress: 10 }, onProgress)
-
-    const mixRequest: MixRequest = {
-      drums_volume: mixerSettings.drums,
-      bass_volume: mixerSettings.bass,
-      other_volume: mixerSettings.other,
-      vocals_volume: mixerSettings.vocals,
-      pitch_shift: mixerSettings.pitchShift,
-      output_format: format,
-    }
-
-    const response = await api.createMix(jobId, mixRequest)
-
-    if (response.status === 'completed' && response.download_url) {
-      // 快取命中，直接開啟下載
-      window.open(response.download_url, '_blank')
-      updateState({ stage: 'complete', progress: 100 }, onProgress)
-      return
-    }
-
-    // 輪詢混音狀態
-    const mixId = response.mix_id
-    updateState({ stage: 'mixing', progress: 30 }, onProgress)
-
-    return new Promise((resolve, reject) => {
-      const pollInterval = setInterval(async () => {
-        try {
-          const status = await api.getMixStatus(jobId, mixId)
-          updateState({ progress: 30 + status.progress * 0.7 }, onProgress)
-
-          if (status.status === 'completed' && status.download_url) {
-            clearInterval(pollInterval)
-            window.open(status.download_url, '_blank')
-            updateState({ stage: 'complete', progress: 100 }, onProgress)
-            resolve()
-          } else if (status.status === 'failed') {
-            clearInterval(pollInterval)
-            reject(new Error(status.error_message || '混音失敗'))
-          }
-        } catch (err) {
-          clearInterval(pollInterval)
-          reject(new Error('查詢狀態失敗'))
-        }
-      }, 1000)
-    })
   }
 
   /**
@@ -268,23 +210,20 @@ export function useDownload() {
 
   /**
    * 開始下載
+   *
+   * 注意：所有混音/編碼都在前端執行（ffmpeg.wasm）
+   * 後端只負責 YouTube 下載，不提供混音 API
    */
   async function startDownload(options: DownloadOptions): Promise<void> {
     reset()
     state.value.isDownloading = true
 
     try {
-      const backend = getBackendCapabilities()
-
-      // 決定使用後端還是前端處理
-      if (options.jobId && backend.available) {
-        // Docker 模式：使用後端 API
-        await downloadFromBackend(options)
-      } else if (options.songId) {
-        // 純靜態模式：使用前端處理
+      // 所有下載都使用前端處理（後端不再提供混音 API）
+      if (options.songId) {
         await downloadFromLocal(options)
       } else {
-        throw new Error('缺少 jobId 或 songId')
+        throw new Error('缺少 songId，無法下載')
       }
     } catch (err) {
       state.value.error = err instanceof Error ? err.message : '下載失敗'

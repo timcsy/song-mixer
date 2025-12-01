@@ -28,6 +28,20 @@ GitHub Pages: https://timcsy.github.io/song-mixer/
 
 ### Docker 模式（支援 YouTube）
 
+#### 使用預建映像（推薦）
+
+直接從 GitHub Container Registry 拉取映像：
+
+```bash
+# 拉取最新版本
+docker pull ghcr.io/timcsy/song-mixer:latest
+
+# 執行
+docker run -p 8080:80 ghcr.io/timcsy/song-mixer:latest
+```
+
+#### 自行建置映像
+
 ```bash
 # 建置映像
 docker build -t song-mixer .
@@ -43,6 +57,19 @@ docker run --gpus all -p 8080:80 -e DEVICE=cuda song-mixer
 
 ### 使用 docker-compose
 
+#### 使用預建映像
+
+建立 `docker-compose.yml`：
+
+```yaml
+services:
+  song-mixer:
+    image: ghcr.io/timcsy/song-mixer:latest
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+```
+
 ```bash
 # 啟動
 docker compose up -d
@@ -52,6 +79,13 @@ docker compose logs -f
 
 # 停止
 docker compose down
+```
+
+#### 自行建置
+
+```bash
+# 使用專案內的 docker-compose.yml 建置並啟動
+docker compose up --build -d
 ```
 
 ## 環境變數
