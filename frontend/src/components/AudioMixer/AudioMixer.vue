@@ -7,8 +7,11 @@ import PitchControl from './PitchControl.vue';
 import type { TrackName, OutputFormat } from '@/types/audio';
 import { api, type MixRequest } from '@/services/api';
 
+import type { SongRecord } from '@/types/storage';
+
 const props = defineProps<{
-  jobId: string;
+  jobId?: string;
+  songRecord?: SongRecord;
   videoElement?: HTMLVideoElement | null;
   hideDownload?: boolean;
   hidePlaybackControls?: boolean;
@@ -23,7 +26,7 @@ const emit = defineEmits<{
 // Video element ref (can be passed as prop or found in parent)
 const videoRef = ref<HTMLVideoElement | null>(props.videoElement ?? null);
 
-// Web Audio composable
+// Web Audio composable - 支援後端 jobId 或本地 songRecord
 const {
   isLoading,
   isPlaying,
@@ -40,7 +43,7 @@ const {
   seek,
   setVolume,
   setPitchShift,
-} = useWebAudio({ jobId: props.jobId });
+} = useWebAudio({ jobId: props.jobId, songRecord: props.songRecord });
 
 // Audio-Video sync composable
 // 影片作為主控制器，Web Audio 跟隨影片

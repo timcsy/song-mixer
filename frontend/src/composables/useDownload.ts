@@ -9,8 +9,10 @@ import { ref } from 'vue'
 import { audioExportService } from '@/services/audioExportService'
 import { ffmpegService } from '@/services/ffmpegService'
 import { storageService } from '@/services/storageService'
-import { getBackendCapabilities, mergeBackend, api, type MixRequest } from '@/services/api'
+import { getBackendCapabilities, api, type MixRequest } from '@/services/api'
 import type { OutputFormat } from '@/types/storage'
+
+// 所有編碼都在前端執行（ffmpeg.wasm）
 
 export interface DownloadState {
   isDownloading: boolean
@@ -193,15 +195,44 @@ export function useDownload() {
 
       case 'mp3': {
         updateState({ stage: 'encoding', progress: 40 }, onProgress)
-        blob = await audioExportService.mixToMp3(tracks, song.duration, 192)
+
+        // 先混音為 WAV，再用 ffmpeg.wasm 轉 MP3
+        const wavBufferForMp3 = await audioExportService.mixToWav(tracks, song.duration)
+
+        updateState({ progress: 60 }, onProgress)
+
+        await ffmpegService.initialize((p) => {
+          updateState({ progress: 60 + p * 10 }, onProgress)
+        })
+
+        blob = await ffmpegService.encodeToMp3(wavBufferForMp3, (p) => {
+          updateState({ progress: 70 + p * 25 }, onProgress)
+        })
         break
       }
 
-      case 'mp4':
       case 'm4a': {
-        // MP4/M4A 需要影片或使用 FFmpeg 編碼
+        updateState({ stage: 'encoding', progress: 40 }, onProgress)
+
+        // 先混音為 WAV，再用 ffmpeg.wasm 轉 M4A
+        const wavBufferForM4a = await audioExportService.mixToWav(tracks, song.duration)
+
+        updateState({ progress: 60 }, onProgress)
+
+        await ffmpegService.initialize((p) => {
+          updateState({ progress: 60 + p * 10 }, onProgress)
+        })
+
+        blob = await ffmpegService.encodeToM4a(wavBufferForM4a, (p) => {
+          updateState({ progress: 70 + p * 25 }, onProgress)
+        })
+        break
+      }
+
+      case 'mp4': {
+        // MP4 需要原始影片
         if (!song.originalVideo) {
-          throw new Error('此歌曲沒有原始影片，無法輸出 MP4/M4A 格式')
+          throw new Error('此歌曲沒有原始影片，無法輸出 MP4 格式')
         }
 
         updateState({ stage: 'encoding', progress: 40 }, onProgress)
@@ -211,23 +242,15 @@ export function useDownload() {
 
         updateState({ progress: 60 }, onProgress)
 
-        // 檢查是否可使用後端 FFmpeg
-        const backend = getBackendCapabilities()
-        if (backend.available && backend.ffmpeg) {
-          // 使用後端 FFmpeg（更快）
-          const videoBlob = new Blob([song.originalVideo], { type: 'video/mp4' })
-          blob = await mergeBackend(videoBlob, wavBuffer, format)
-        } else {
-          // 使用前端 ffmpeg.wasm
-          await ffmpegService.initialize((p) => {
-            updateState({ progress: 60 + p * 20 }, onProgress)
-          })
+        // 使用 ffmpeg.wasm 合併
+        await ffmpegService.initialize((p) => {
+          updateState({ progress: 60 + p * 10 }, onProgress)
+        })
 
-          const videoBlob = new Blob([song.originalVideo], { type: 'video/mp4' })
-          blob = await ffmpegService.mergeVideoAudio(videoBlob, wavBuffer, format, (p) => {
-            updateState({ progress: 80 + p * 15 }, onProgress)
-          })
-        }
+        const videoBlob = new Blob([song.originalVideo], { type: 'video/mp4' })
+        blob = await ffmpegService.mergeVideoAudio(videoBlob, wavBuffer, 'mp4', (p) => {
+          updateState({ progress: 70 + p * 25 }, onProgress)
+        })
         break
       }
 

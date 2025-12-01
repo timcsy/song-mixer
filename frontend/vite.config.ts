@@ -20,6 +20,13 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true
       }
+    },
+    fs: {
+      // 允許存取 public 目錄外的檔案
+      strict: false
     }
+  },
+  optimizeDeps: {
+    exclude: ['onnxruntime-web']
   }
 })

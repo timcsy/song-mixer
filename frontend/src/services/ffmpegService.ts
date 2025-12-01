@@ -129,6 +129,98 @@ class FFmpegService {
   }
 
   /**
+   * 將 WAV 編碼為 MP3
+   * @returns MP3 Blob
+   */
+  async encodeToMp3(
+    audioBuffer: ArrayBuffer,
+    onProgress?: (progress: number) => void
+  ): Promise<Blob> {
+    if (!this.ffmpeg || !this.ffmpeg.isLoaded()) {
+      await this.initialize()
+    }
+
+    if (!this.ffmpeg) {
+      throw new Error('FFmpeg 初始化失敗')
+    }
+
+    this.progressCallback = onProgress || null
+
+    try {
+      // 寫入輸入檔案
+      const audioData = new Uint8Array(audioBuffer)
+      this.ffmpeg.FS('writeFile', 'input.wav', audioData)
+
+      // 執行轉換：WAV → MP3 (192kbps)
+      await this.ffmpeg.run(
+        '-i', 'input.wav',
+        '-c:a', 'libmp3lame',
+        '-b:a', '192k',
+        'output.mp3'
+      )
+
+      // 讀取輸出
+      const outputData = this.ffmpeg.FS('readFile', 'output.mp3')
+
+      // 清理暫存檔案
+      this.ffmpeg.FS('unlink', 'input.wav')
+      this.ffmpeg.FS('unlink', 'output.mp3')
+
+      return new Blob([outputData], { type: 'audio/mpeg' })
+    } catch (error) {
+      throw new Error(`MP3 編碼失敗: ${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      this.progressCallback = null
+    }
+  }
+
+  /**
+   * 將 WAV 編碼為 M4A (AAC)
+   * @returns M4A Blob
+   */
+  async encodeToM4a(
+    audioBuffer: ArrayBuffer,
+    onProgress?: (progress: number) => void
+  ): Promise<Blob> {
+    if (!this.ffmpeg || !this.ffmpeg.isLoaded()) {
+      await this.initialize()
+    }
+
+    if (!this.ffmpeg) {
+      throw new Error('FFmpeg 初始化失敗')
+    }
+
+    this.progressCallback = onProgress || null
+
+    try {
+      // 寫入輸入檔案
+      const audioData = new Uint8Array(audioBuffer)
+      this.ffmpeg.FS('writeFile', 'input.wav', audioData)
+
+      // 執行轉換：WAV → M4A (AAC 192kbps)
+      await this.ffmpeg.run(
+        '-i', 'input.wav',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        'output.m4a'
+      )
+
+      // 讀取輸出
+      const outputData = this.ffmpeg.FS('readFile', 'output.m4a')
+
+      // 清理暫存檔案
+      this.ffmpeg.FS('unlink', 'input.wav')
+      this.ffmpeg.FS('unlink', 'output.m4a')
+
+      return new Blob([outputData], { type: 'audio/mp4' })
+    } catch (error) {
+      throw new Error(`M4A 編碼失敗: ${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      this.progressCallback = null
+    }
+  }
+
+  /**
    * 合併影片與音訊
    */
   async mergeVideoAudio(

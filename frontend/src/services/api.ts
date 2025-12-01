@@ -103,60 +103,6 @@ export async function downloadYouTube(url: string): Promise<{
   return { audio: audioBuffer, title, duration, thumbnail }
 }
 
-// ========== FFmpeg API (Docker mode only) ==========
-
-/**
- * 使用後端 FFmpeg 提取音頻（比 ffmpeg.wasm 快 5-10 倍）
- */
-export async function extractAudioBackend(video: File): Promise<{
-  audio: ArrayBuffer
-  duration: number
-}> {
-  const formData = new FormData()
-  formData.append('video', video)
-
-  const response = await fetch(`${API_BASE}/ffmpeg/extract-audio`, {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.message || '音頻提取失敗')
-  }
-
-  const audio = await response.arrayBuffer()
-  const duration = parseFloat(response.headers.get('X-Video-Duration') || '0')
-
-  return { audio, duration }
-}
-
-/**
- * 使用後端 FFmpeg 合併影片與音訊
- */
-export async function mergeBackend(
-  video: Blob,
-  audio: ArrayBuffer,
-  format: 'mp4' | 'm4a'
-): Promise<Blob> {
-  const formData = new FormData()
-  formData.append('video', video)
-  formData.append('audio', new Blob([audio], { type: 'audio/wav' }))
-  formData.append('format', format)
-
-  const response = await fetch(`${API_BASE}/ffmpeg/merge`, {
-    method: 'POST',
-    body: formData,
-  })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.message || '合併失敗')
-  }
-
-  return response.blob()
-}
-
 // ========== Legacy Types ==========
 
 export interface Job {

@@ -12,6 +12,8 @@ import { storageService } from '@/services/storageService'
 import { downloadYouTube, getBackendCapabilities } from '@/services/api'
 import type { ProcessingState, SongRecord, ProcessOptions } from '@/types/storage'
 
+// 所有媒體處理都在前端執行（ffmpeg.wasm + demucs-web）
+
 // 處理狀態
 const state = ref<ProcessingState>({
   stage: 'idle',
@@ -170,33 +172,22 @@ async function processUpload(
       )
     }
 
-    // 階段 1：提取音頻
+    // 階段 1：使用 ffmpeg.wasm 提取音頻
     updateState({ stage: 'extracting', progress: 0 }, options)
     checkCancelled()
 
-    // 檢查後端是否可用，優先使用後端 FFmpeg（更快）
-    const backend = getBackendCapabilities()
     let wavBuffer: ArrayBuffer
     let duration: number
 
-    if (backend.available && backend.ffmpeg) {
-      // 使用後端 FFmpeg
-      const result = await import('@/services/api').then(m =>
-        m.extractAudioBackend(file)
-      )
-      wavBuffer = result.audio
-      duration = result.duration
-    } else {
-      // 使用前端 ffmpeg.wasm
-      await ffmpegService.initialize((p) => {
-        updateState({ progress: p * 30 }, options)
-      })
+    // 統一使用前端 ffmpeg.wasm 處理
+    await ffmpegService.initialize((p) => {
+      updateState({ progress: p * 30 }, options)
+    })
 
-      wavBuffer = await ffmpegService.extractAudio(file, (p) => {
-        updateState({ progress: 30 + p * 20 }, options)
-      })
-      duration = 0 // 會在解析 WAV 時計算
-    }
+    wavBuffer = await ffmpegService.extractAudio(file, (p) => {
+      updateState({ progress: 30 + p * 20 }, options)
+    })
+    duration = 0 // 會在解析 WAV 時計算
 
     updateState({ progress: 50 }, options)
     checkCancelled()

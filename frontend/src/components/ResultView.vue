@@ -110,21 +110,23 @@ const startDownload = async () => {
 
 // 載入本地歌曲資料（純靜態模式）
 onMounted(async () => {
-  if (!backend.available) {
-    try {
-      await storageService.init();
-      const song = await storageService.getSong(props.job.id);
-      if (song) {
-        localSong.value = song;
-        // 如果沒有原始影片，預設選擇 WAV
-        if (!song.originalVideo) {
-          selectedFormat.value = 'wav';
-        }
+  // 嘗試從 IndexedDB 載入
+  try {
+    await storageService.init();
+    const song = await storageService.getSong(props.job.id);
+    if (song) {
+      localSong.value = song;
+      // 如果沒有原始影片，預設選擇 WAV
+      if (!song.originalVideo) {
+        selectedFormat.value = 'wav';
       }
-    } catch (err) {
-      console.warn('無法載入本地歌曲資料:', err);
     }
+  } catch (err) {
+    console.warn('無法載入本地歌曲資料:', err);
   }
+
+  // 設定影片 URL
+  await setupVideoUrl();
 });
 
 const statusText = computed(() => {
@@ -153,9 +155,23 @@ const progressText = computed(() => {
   return `${props.job.progress}%`;
 });
 
-const streamUrl = computed(() => {
-  return api.getStreamUrl(props.job.id);
-});
+// 影片串流 URL（後端模式）或 Blob URL（本地模式）
+const videoUrl = ref<string | null>(null);
+
+// 設定影片 URL
+const setupVideoUrl = async () => {
+  if (backend.available) {
+    // 後端模式：使用 API 串流
+    videoUrl.value = api.getStreamUrl(props.job.id);
+  } else if (localSong.value?.originalVideo) {
+    // 本地模式：從 IndexedDB 建立 Blob URL
+    const blob = new Blob([localSong.value.originalVideo], { type: 'video/mp4' });
+    videoUrl.value = URL.createObjectURL(blob);
+  }
+};
+
+// streamUrl 向後相容
+const streamUrl = computed(() => videoUrl.value || '');
 
 const fileSizeText = computed(() => {
   if (!props.job.result?.output_size) return '';
@@ -197,6 +213,7 @@ const durationText = computed(() => {
         <div class="left-panel">
           <div class="video-wrapper">
             <video
+              v-if="streamUrl"
               ref="videoElement"
               :src="streamUrl"
               preload="metadata"
@@ -207,21 +224,33 @@ const durationText = computed(() => {
             >
               您的瀏覽器不支援影片播放
             </video>
+            <div v-else class="no-video-placeholder">
+              <div class="placeholder-icon">🎵</div>
+              <p>純音訊模式</p>
+              <p class="placeholder-hint">使用右側混音器控制播放</p>
+            </div>
           </div>
         </div>
 
         <!-- 右側：混音控制 -->
         <div class="right-panel">
+          <!-- 等待本地歌曲載入或使用後端模式 -->
           <AudioMixer
+            v-if="backend.available || localSong"
             ref="audioMixerRef"
-            :job-id="job.id"
+            :job-id="backend.available ? job.id : undefined"
+            :song-record="localSong || undefined"
             :video-element="videoElement"
             :title="job.source_title || '音軌混音'"
             @ready="handleMixerReady"
             @error="handleMixerError"
             hide-download
-            hide-playback-controls
+            :hide-playback-controls="!!streamUrl"
           />
+          <div v-else class="mixer-loading">
+            <div class="loading-spinner"></div>
+            <span>載入音軌資料中...</span>
+          </div>
         </div>
       </div>
 
@@ -398,6 +427,27 @@ h2 {
   max-height: 100%;
   width: auto;
   height: auto;
+}
+
+.no-video-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: #888;
+  text-align: center;
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.placeholder-hint {
+  font-size: 0.875rem;
+  color: #666;
 }
 
 /* 隱藏影片播放列的下載、播放速度和音量按鈕（音量由混音器控制） */

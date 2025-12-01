@@ -9,6 +9,10 @@ import * as ort from 'onnxruntime-web'
 import { DemucsProcessor, CONSTANTS } from 'demucs-web'
 import type { SeparationResult } from '@/types/storage'
 
+// 設定 ONNX Runtime WASM 檔案路徑
+// 使用 jsDelivr CDN（支援 CORS，版本須與 npm 一致）
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/'
+
 /**
  * Demucs 服務封裝
  */

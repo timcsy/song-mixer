@@ -40,6 +40,6 @@ async def health_check():
         # 告訴前端後端支援的功能
         "features": {
             "youtube": True,  # 支援 YouTube 下載
-            "ffmpeg": True,   # 支援後端 FFmpeg 處理
+            "ffmpeg": False,  # FFmpeg 處理已移至前端 (ffmpeg.wasm)
         }
     }

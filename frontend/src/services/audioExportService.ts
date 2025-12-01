@@ -2,10 +2,9 @@
  * 音訊匯出服務
  * Feature: 005-frontend-processing
  *
- * 使用 Web Audio API 和 lamejs 進行混音輸出
+ * 使用 Web Audio API 進行混音輸出（WAV）
+ * MP3/M4A 編碼由 ffmpegService 處理
  */
-
-import lamejs from 'lamejs'
 
 /**
  * 音訊匯出服務
@@ -39,24 +38,6 @@ class AudioExportService {
   }
 
   /**
-   * 混音並輸出為 MP3
-   */
-  async mixToMp3(
-    tracks: Array<{ buffer: AudioBuffer; volume: number }>,
-    duration: number,
-    bitrate = 128
-  ): Promise<Blob> {
-    // 先混音為 WAV
-    const wavBuffer = await this.mixToWav(tracks, duration)
-
-    // 解析 WAV 資料
-    const audioBuffer = await this.wavToAudioBuffer(wavBuffer)
-
-    // 使用 lamejs 編碼為 MP3
-    return this.encodeToMp3(audioBuffer, bitrate)
-  }
-
-  /**
    * 將 ArrayBuffer (Float32 立體聲) 轉換為 AudioBuffer
    */
   async arrayBufferToAudioBuffer(
@@ -79,74 +60,6 @@ class AudioExportService {
 
     audioCtx.close()
     return audioBuffer
-  }
-
-  /**
-   * 將 WAV ArrayBuffer 轉換為 AudioBuffer
-   */
-  private async wavToAudioBuffer(wavBuffer: ArrayBuffer): Promise<AudioBuffer> {
-    const audioCtx = new AudioContext()
-    const audioBuffer = await audioCtx.decodeAudioData(wavBuffer)
-    audioCtx.close()
-    return audioBuffer
-  }
-
-  /**
-   * 使用 lamejs 編碼為 MP3
-   */
-  private encodeToMp3(audioBuffer: AudioBuffer, bitrate: number): Blob {
-    const channels = audioBuffer.numberOfChannels
-    const sampleRate = audioBuffer.sampleRate
-    const encoder = new lamejs.Mp3Encoder(channels, sampleRate, bitrate)
-
-    const mp3Data: Uint8Array[] = []
-    const sampleBlockSize = 1152
-
-    if (channels === 1) {
-      // Mono
-      const samples = this.float32ToInt16(audioBuffer.getChannelData(0))
-      for (let i = 0; i < samples.length; i += sampleBlockSize) {
-        const chunk = samples.subarray(i, i + sampleBlockSize)
-        const mp3Chunk = encoder.encodeBuffer(chunk)
-        if (mp3Chunk.length > 0) mp3Data.push(new Uint8Array(mp3Chunk))
-      }
-    } else {
-      // Stereo
-      const left = this.float32ToInt16(audioBuffer.getChannelData(0))
-      const right = this.float32ToInt16(audioBuffer.getChannelData(1))
-      for (let i = 0; i < left.length; i += sampleBlockSize) {
-        const leftChunk = left.subarray(i, i + sampleBlockSize)
-        const rightChunk = right.subarray(i, i + sampleBlockSize)
-        const mp3Chunk = encoder.encodeBuffer(leftChunk, rightChunk)
-        if (mp3Chunk.length > 0) mp3Data.push(new Uint8Array(mp3Chunk))
-      }
-    }
-
-    const finalChunk = encoder.flush()
-    if (finalChunk.length > 0) mp3Data.push(new Uint8Array(finalChunk))
-
-    // 合併所有 Uint8Array 為單一 ArrayBuffer
-    const totalLength = mp3Data.reduce((acc, arr) => acc + arr.length, 0)
-    const result = new Uint8Array(totalLength)
-    let offset = 0
-    for (const arr of mp3Data) {
-      result.set(arr, offset)
-      offset += arr.length
-    }
-
-    return new Blob([result.buffer], { type: 'audio/mp3' })
-  }
-
-  /**
-   * Float32 轉 Int16
-   */
-  private float32ToInt16(float32: Float32Array): Int16Array {
-    const int16 = new Int16Array(float32.length)
-    for (let i = 0; i < float32.length; i++) {
-      const s = Math.max(-1, Math.min(1, float32[i]))
-      int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff
-    }
-    return int16
   }
 
   /**
