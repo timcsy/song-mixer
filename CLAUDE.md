@@ -40,10 +40,10 @@ sing/
 
 ```bash
 # 建置
-docker build -t vocal-remover .
+docker build -t song-mixer .
 
 # 執行
-docker run -p 8080:80 vocal-remover
+docker run -p 8080:80 song-mixer
 
 # 使用 docker-compose
 docker compose up -d

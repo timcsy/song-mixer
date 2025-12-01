@@ -5,7 +5,7 @@
 ### 後端
 - Python 3.11+
 - FFmpeg（含 librubberband）
-- 現有 vocal-remover 環境
+- 現有 song-mixer 環境
 
 ### 前端
 - Node.js 18+

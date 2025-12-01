@@ -17,7 +17,7 @@
 
 **Acceptance Scenarios**:
 
-1. **Given** 使用者已安裝 Docker，**When** 執行 `docker run -p 8080:80 vocal-remover`，**Then** 服務在 30 秒內啟動完成，瀏覽器可存取 http://localhost:8080
+1. **Given** 使用者已安裝 Docker，**When** 執行 `docker run -p 8080:80 song-mixer`，**Then** 服務在 30 秒內啟動完成，瀏覽器可存取 http://localhost:8080
 2. **Given** 服務已啟動，**When** 使用者停止容器，**Then** 所有資源釋放，無殘留程序
 
 ---

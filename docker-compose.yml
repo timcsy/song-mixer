@@ -1,5 +1,5 @@
 services:
-  vocal-remover:
+  song-mixer:
     build:
       context: .
       dockerfile: Dockerfile

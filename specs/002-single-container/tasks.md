@@ -54,7 +54,7 @@
 
 **Goal**: 使用者透過單一 Docker 指令啟動完整服務
 
-**Independent Test**: 執行 `docker run -p 8080:80 vocal-remover` 後，瀏覽器開啟 http://localhost:8080 可看到前端介面
+**Independent Test**: 執行 `docker run -p 8080:80 song-mixer` 後，瀏覽器開啟 http://localhost:8080 可看到前端介面
 
 ### Implementation for User Story 1
 

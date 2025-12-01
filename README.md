@@ -1,35 +1,42 @@
-# 人聲去除服務 Vocal Remover
+# Song Mixer 歌曲混音器
 
-從影片中分離人聲，產生伴奏版本。支援 YouTube 網址和本地檔案上傳。
+AI 驅動的歌曲混音工具，從影片中分離音軌（人聲、鼓、貝斯、其他），支援即時混音控制。
 
 使用 [Demucs](https://github.com/facebookresearch/demucs) AI 模型進行音源分離。
 
+## 線上試用
+
+GitHub Pages: https://timcsy.github.io/song-mixer/
+
 ## 功能特色
 
-- 支援 YouTube 網址直接處理
-- 支援本地影片檔案上傳 (MP4, MOV, AVI, MKV, WebM)
-- 高品質人聲分離 (使用 Demucs htdemucs 模型)
-- 即時進度追蹤
-- 支援 GPU 加速 (NVIDIA CUDA)
-- 單一 Docker 容器，一鍵啟動
+- 支援 YouTube 網址直接處理（需後端）
+- 支援本地影片檔案上傳
+- AI 音源分離（Demucs htdemucs 模型）
+- 四軌獨立控制（人聲、鼓、貝斯、其他樂器）
+- 即時音量調整與靜音
+- 升降 Key 調整
+- 多種輸出格式（MP4、MP3、M4A、WAV）
+- 純前端處理模式（使用 WebAssembly）
+- 處理結果本地儲存（IndexedDB）
 
-## 快速開始
+## 使用方式
 
-### 需求
+### 純前端模式（GitHub Pages）
 
-- Docker Desktop
+直接訪問 https://timcsy.github.io/song-mixer/，上傳本地檔案即可處理。
 
-### 建置與執行
+### Docker 模式（支援 YouTube）
 
 ```bash
 # 建置映像
-docker build -t vocal-remover .
+docker build -t song-mixer .
 
 # 執行（CPU 模式）
-docker run -p 8080:80 vocal-remover
+docker run -p 8080:80 song-mixer
 
 # 執行（GPU 模式，需要 NVIDIA GPU）
-docker run --gpus all -p 8080:80 -e DEVICE=cuda vocal-remover
+docker run --gpus all -p 8080:80 -e DEVICE=cuda song-mixer
 ```
 
 啟動後訪問: http://localhost:8080
@@ -56,55 +63,17 @@ docker compose down
 | `MAX_VIDEO_DURATION` | `600` | 最大影片長度（秒） |
 | `JOB_TIMEOUT_MINUTES` | `30` | 任務超時時間（分鐘） |
 
-## 持久化儲存（選配）
-
-預設情況下，處理結果儲存在容器內，容器停止後資料會消失。若需持久化：
-
-```bash
-docker run -p 8080:80 -v vocal-data:/data vocal-remover
-```
-
-## 專案結構
-
-```
-sing/
-├── backend/                 # FastAPI 後端
-│   ├── app/
-│   │   ├── api/            # API 路由
-│   │   ├── core/           # 核心設定
-│   │   ├── models/         # 資料模型
-│   │   └── services/       # 服務層
-│   └── requirements.txt
-├── frontend/               # Vue.js 前端
-│   └── src/
-├── docker/                 # Docker 設定檔
-│   ├── nginx.conf          # Nginx 反向代理設定
-│   └── supervisord.conf    # 程序管理設定
-├── Dockerfile              # 單一容器建置檔
-└── docker-compose.yml      # Docker Compose 設定
-```
-
 ## 技術架構
 
-- **Frontend:** Vue 3 + TypeScript + Vite
-- **Backend:** FastAPI + Python 3.11
-- **AI Model:** Demucs (htdemucs)
-- **Video Processing:** FFmpeg
-- **YouTube Download:** yt-dlp
-- **Process Manager:** Supervisor (Nginx + Uvicorn)
-- **Container:** 單一 Docker 容器
+- **Frontend:** Vue 3 + TypeScript + Vite + Tone.js
+- **Backend:** FastAPI + Python 3.11（YouTube 代理）
+- **AI Model:** Demucs (htdemucs) / ONNX Runtime (WebAssembly)
+- **Audio Processing:** Web Audio API + Tone.js
+- **Storage:** IndexedDB（前端）
 
 ## 開發
 
-### 本地開發（僅後端）
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-### 本地開發（僅前端）
+### 本地開發（前端）
 
 ```bash
 cd frontend
@@ -112,8 +81,23 @@ npm install
 npm run dev
 ```
 
+### 本地開發（後端 + 前端）
+
+```bash
+# 啟動後端
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+
+# 啟動前端
+cd frontend
+npm install
+npm run dev
+```
+
 ## 注意事項
 
+- 純前端模式需要瀏覽器支援 SharedArrayBuffer
 - CPU 模式下處理時間較長，請耐心等待
 - 建議單次處理一個任務以獲得最佳效能
 - 影片長度限制預設為 10 分鐘
@@ -125,4 +109,5 @@ MIT License
 ## 致謝
 
 - [Demucs](https://github.com/facebookresearch/demucs) - Meta AI 的音源分離模型
+- [Tone.js](https://tonejs.github.io/) - Web Audio API 框架
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube 下載工具
