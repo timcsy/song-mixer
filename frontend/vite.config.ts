@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import path from 'path'
 
 export default defineConfig({
+  base: process.env.VITE_BASE_URL || '/',
   plugins: [vue()],
   resolve: {
     alias: {
@@ -11,11 +12,22 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true
       }
+    },
+    fs: {
+      // 允許存取 public 目錄外的檔案
+      strict: false
     }
+  },
+  optimizeDeps: {
+    exclude: ['onnxruntime-web']
   }
 })

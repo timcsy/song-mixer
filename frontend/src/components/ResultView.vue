@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { api, type JobWithResult, type MixRequest, type OutputFormat } from '../services/api';
+import { ref, computed, onMounted } from 'vue';
+import JSZip from 'jszip';
+import { getBackendCapabilities, type JobWithResult, type OutputFormat } from '../services/api';
+import { storageService } from '@/services/storageService';
+import { useDownload } from '@/composables/useDownload';
+import { formatDuration, formatFileSize } from '@/utils/format';
 import ProgressBar from './ProgressBar.vue';
 import AudioMixer from './AudioMixer/AudioMixer.vue';
+import type { SongRecord } from '@/types/storage';
 
 const props = defineProps<{
   job: JobWithResult;
@@ -15,6 +20,12 @@ const emit = defineEmits<{
 const isCompleted = computed(() => props.job.status === 'completed');
 const isFailed = computed(() => props.job.status === 'failed');
 const isProcessing = computed(() => !isCompleted.value && !isFailed.value);
+
+// 後端功能偵測
+const backend = getBackendCapabilities();
+
+// 本地歌曲資料（純靜態模式）
+const localSong = ref<SongRecord | null>(null);
 
 // Video element reference for AudioMixer sync
 const videoElement = ref<HTMLVideoElement | null>(null);
@@ -36,76 +47,186 @@ const handleMixerError = (message: string) => {
 
 // ========== 下載功能 ==========
 const selectedFormat = ref<OutputFormat>('mp4');
-const isDownloading = ref(false);
-const downloadProgress = ref(0);
-const downloadError = ref<string | null>(null);
+const { state: downloadState, startDownload: doDownload, reset: resetDownload } = useDownload();
 
-const formatOptions: { value: OutputFormat; label: string }[] = [
-  { value: 'mp4', label: 'MP4' },
-  { value: 'm4a', label: 'M4A' },
-  { value: 'mp3', label: 'MP3' },
-  { value: 'wav', label: 'WAV' },
-];
+// 可用的下載格式（純靜態模式下，沒有原始影片則不支援 MP4/M4A）
+const formatOptions = computed(() => {
+  const options: { value: OutputFormat; label: string; disabled?: boolean }[] = [
+    { value: 'wav', label: 'WAV' },
+    { value: 'mp3', label: 'MP3' },
+  ];
+
+  // MP4/M4A 需要後端 FFmpeg 或本地原始影片
+  const canExportVideo = backend.available || localSong.value?.originalVideo;
+  options.push(
+    { value: 'm4a', label: 'M4A', disabled: !canExportVideo && !backend.ffmpeg },
+    { value: 'mp4', label: 'MP4', disabled: !canExportVideo },
+  );
+
+  return options;
+});
+
+// 下載進度訊息
+const downloadStageText = computed(() => {
+  switch (downloadState.value.stage) {
+    case 'preparing': return '準備中...';
+    case 'mixing': return '混音中...';
+    case 'encoding': return '編碼中...';
+    case 'complete': return '完成';
+    default: return '';
+  }
+});
 
 const startDownload = async () => {
-  if (isDownloading.value || !audioMixerRef.value) return;
+  if (downloadState.value.isDownloading || !audioMixerRef.value) return;
 
-  isDownloading.value = true;
-  downloadProgress.value = 0;
-  downloadError.value = null;
+  // 檢查格式是否被禁用
+  const formatOpt = formatOptions.value.find(f => f.value === selectedFormat.value);
+  if (formatOpt?.disabled) {
+    return;
+  }
+
+  resetDownload();
 
   try {
-    // Get current mixer settings
     const mixer = audioMixerRef.value;
-    const mixRequest: MixRequest = {
-      drums_volume: mixer.tracks?.drums?.volume ?? 1,
-      bass_volume: mixer.tracks?.bass?.volume ?? 1,
-      other_volume: mixer.tracks?.other?.volume ?? 1,
-      vocals_volume: mixer.tracks?.vocals?.volume ?? 0,
-      pitch_shift: mixer.pitchShift ?? 0,
-      output_format: selectedFormat.value,
+    const mixerSettings = {
+      drums: mixer.tracks?.drums?.volume ?? 1,
+      bass: mixer.tracks?.bass?.volume ?? 1,
+      other: mixer.tracks?.other?.volume ?? 1,
+      vocals: mixer.tracks?.vocals?.volume ?? 0,
+      pitchShift: mixer.pitchShift ?? 0,
     };
 
-    const response = await api.createMix(props.job.id, mixRequest);
-
-    if (response.status === 'completed' && response.download_url) {
-      triggerDownload(response.download_url);
-      return;
-    }
-
-    // Poll for completion
-    const mixId = response.mix_id;
-    const pollInterval = setInterval(async () => {
-      try {
-        const status = await api.getMixStatus(props.job.id, mixId);
-        downloadProgress.value = status.progress;
-
-        if (status.status === 'completed' && status.download_url) {
-          clearInterval(pollInterval);
-          triggerDownload(status.download_url);
-        } else if (status.status === 'failed') {
-          clearInterval(pollInterval);
-          downloadError.value = status.error_message || '混音失敗';
-          isDownloading.value = false;
-        }
-      } catch {
-        clearInterval(pollInterval);
-        downloadError.value = '查詢狀態失敗';
-        isDownloading.value = false;
-      }
-    }, 1000);
-  } catch {
-    downloadError.value = '建立混音任務失敗';
-    isDownloading.value = false;
+    await doDownload({
+      jobId: backend.available ? props.job.id : undefined,
+      songId: !backend.available && localSong.value ? localSong.value.id : undefined,
+      format: selectedFormat.value,
+      mixerSettings,
+      title: props.job.source_title || '混音',
+    });
+  } catch (err) {
+    // 錯誤已經設定到 downloadState.error
   }
 };
 
-const triggerDownload = (url: string) => {
-  // 直接在新分頁開啟下載 URL，讓瀏覽器處理下載
-  // 後端已設定 Content-Disposition: attachment
-  window.open(url, '_blank');
-  isDownloading.value = false;
+// ========== 匯出功能 ==========
+const isExporting = ref(false);
+
+// Int16 PCM 資料轉 WAV 檔案
+function int16ToWav(pcmData: ArrayBuffer, sampleRate: number, numChannels: number = 2): ArrayBuffer {
+  const pcmBytes = new Uint8Array(pcmData);
+  const wavHeader = 44;
+  const wavBuffer = new ArrayBuffer(wavHeader + pcmBytes.length);
+  const view = new DataView(wavBuffer);
+
+  // RIFF header
+  view.setUint32(0, 0x52494646, false); // "RIFF"
+  view.setUint32(4, 36 + pcmBytes.length, true); // file size - 8
+  view.setUint32(8, 0x57415645, false); // "WAVE"
+
+  // fmt chunk
+  view.setUint32(12, 0x666d7420, false); // "fmt "
+  view.setUint32(16, 16, true); // chunk size
+  view.setUint16(20, 1, true); // PCM format
+  view.setUint16(22, numChannels, true); // channels
+  view.setUint32(24, sampleRate, true); // sample rate
+  view.setUint32(28, sampleRate * numChannels * 2, true); // byte rate
+  view.setUint16(32, numChannels * 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+
+  // data chunk
+  view.setUint32(36, 0x64617461, false); // "data"
+  view.setUint32(40, pcmBytes.length, true); // data size
+
+  // PCM data
+  new Uint8Array(wavBuffer, wavHeader).set(pcmBytes);
+
+  return wavBuffer;
+}
+
+const exportSong = async () => {
+  if (!localSong.value || isExporting.value) return;
+
+  isExporting.value = true;
+  try {
+    const song = localSong.value;
+    const zip = new JSZip();
+    const sampleRate = song.sampleRate || 44100;
+
+    // 建立元資料 JSON
+    const metadata = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      song: {
+        id: song.id,
+        title: song.title,
+        sourceType: song.sourceType,
+        sourceUrl: song.sourceUrl,
+        thumbnailUrl: song.thumbnailUrl,
+        duration: song.duration,
+        sampleRate: sampleRate,
+        createdAt: song.createdAt.toISOString(),
+        storageSize: song.storageSize,
+      },
+    };
+
+    // 加入元資料
+    zip.file('metadata.json', JSON.stringify(metadata, null, 2));
+
+    // 加入音軌（WAV 格式）
+    const tracksFolder = zip.folder('tracks');
+    if (tracksFolder) {
+      tracksFolder.file('drums.wav', int16ToWav(song.tracks.drums, sampleRate));
+      tracksFolder.file('bass.wav', int16ToWav(song.tracks.bass, sampleRate));
+      tracksFolder.file('other.wav', int16ToWav(song.tracks.other, sampleRate));
+      tracksFolder.file('vocals.wav', int16ToWav(song.tracks.vocals, sampleRate));
+    }
+
+    // 加入原始影片（如果有）
+    if (song.originalVideo) {
+      zip.file('video.mp4', song.originalVideo);
+    }
+
+    // 產生 ZIP 並下載
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(zipBlob);
+
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${song.title || 'song'}.mix.zip`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error('匯出失敗:', err);
+    alert('匯出失敗，請稍後再試');
+  } finally {
+    isExporting.value = false;
+  }
 };
+
+// 載入本地歌曲資料（純靜態模式）
+onMounted(async () => {
+  // 嘗試從 IndexedDB 載入
+  try {
+    await storageService.init();
+    const song = await storageService.getSong(props.job.id);
+    if (song) {
+      localSong.value = song;
+      // 如果沒有原始影片，預設選擇 WAV
+      if (!song.originalVideo) {
+        selectedFormat.value = 'wav';
+      }
+    }
+  } catch (err) {
+    console.warn('無法載入本地歌曲資料:', err);
+  }
+
+  // 設定影片 URL
+  await setupVideoUrl();
+});
 
 const statusText = computed(() => {
   switch (props.job.status) {
@@ -133,24 +254,40 @@ const progressText = computed(() => {
   return `${props.job.progress}%`;
 });
 
-const streamUrl = computed(() => {
-  return api.getStreamUrl(props.job.id);
-});
+// 影片串流 URL（後端模式）或 Blob URL（本地模式）
+const videoUrl = ref<string | null>(null);
+
+// 設定影片 URL
+const setupVideoUrl = async () => {
+  // 優先使用本地 IndexedDB 的影片
+  if (localSong.value?.originalVideo) {
+    const blob = new Blob([localSong.value.originalVideo], { type: 'video/mp4' });
+    videoUrl.value = URL.createObjectURL(blob);
+  }
+  // 如無本地資料，才嘗試後端串流（舊版相容）
+  // else if (backend.available) {
+  //   videoUrl.value = api.getStreamUrl(props.job.id);
+  // }
+};
+
+// streamUrl 向後相容
+const streamUrl = computed(() => videoUrl.value || '');
 
 const fileSizeText = computed(() => {
-  if (!props.job.result?.output_size) return '';
-  const size = props.job.result.output_size;
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  // 優先使用本地歌曲的原始影片大小
+  if (localSong.value?.originalVideo) {
+    return formatFileSize(localSong.value.originalVideo.byteLength);
+  }
+  // 後端返回的輸出大小
+  if (props.job.result?.output_size) {
+    return formatFileSize(props.job.result.output_size);
+  }
+  return '';
 });
 
 const durationText = computed(() => {
   if (!props.job.result?.original_duration) return '';
-  const seconds = props.job.result.original_duration;
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
+  return formatDuration(props.job.result.original_duration);
 });
 </script>
 
@@ -177,6 +314,7 @@ const durationText = computed(() => {
         <div class="left-panel">
           <div class="video-wrapper">
             <video
+              v-if="streamUrl"
               ref="videoElement"
               :src="streamUrl"
               preload="metadata"
@@ -187,21 +325,33 @@ const durationText = computed(() => {
             >
               您的瀏覽器不支援影片播放
             </video>
+            <div v-else class="no-video-placeholder">
+              <div class="placeholder-icon">🎵</div>
+              <p>純音訊模式</p>
+              <p class="placeholder-hint">使用右側混音器控制播放</p>
+            </div>
           </div>
         </div>
 
         <!-- 右側：混音控制 -->
         <div class="right-panel">
+          <!-- 等待本地歌曲載入或使用後端模式 -->
           <AudioMixer
+            v-if="backend.available || localSong"
             ref="audioMixerRef"
-            :job-id="job.id"
+            :job-id="backend.available ? job.id : undefined"
+            :song-record="localSong || undefined"
             :video-element="videoElement"
             :title="job.source_title || '音軌混音'"
             @ready="handleMixerReady"
             @error="handleMixerError"
             hide-download
-            hide-playback-controls
+            :hide-playback-controls="!!streamUrl"
           />
+          <div v-else class="mixer-loading">
+            <div class="loading-spinner"></div>
+            <span>載入音軌資料中...</span>
+          </div>
         </div>
       </div>
 
@@ -227,13 +377,17 @@ const durationText = computed(() => {
               v-for="opt in formatOptions"
               :key="opt.value"
               class="format-option"
-              :class="{ selected: selectedFormat === opt.value }"
+              :class="{
+                selected: selectedFormat === opt.value,
+                disabled: opt.disabled
+              }"
+              :title="opt.disabled ? '此格式需要原始影片' : ''"
             >
               <input
                 type="radio"
                 :value="opt.value"
                 v-model="selectedFormat"
-                :disabled="isDownloading"
+                :disabled="downloadState.isDownloading || opt.disabled"
               />
               {{ opt.label }}
             </label>
@@ -241,16 +395,32 @@ const durationText = computed(() => {
           <button
             @click="startDownload"
             class="download-btn primary"
-            :disabled="!mixerReady || isDownloading"
+            :disabled="!mixerReady || downloadState.isDownloading"
           >
-            <span v-if="isDownloading">{{ downloadProgress }}%</span>
+            <span v-if="downloadState.isDownloading">
+              {{ downloadStageText }} {{ downloadState.progress }}%
+            </span>
             <span v-else>下載</span>
+          </button>
+          <button
+            v-if="localSong"
+            @click="exportSong"
+            class="download-btn export"
+            :disabled="isExporting"
+            title="匯出歌曲資料（可備份或轉移）"
+          >
+            <span v-if="isExporting">匯出中...</span>
+            <span v-else>匯出</span>
           </button>
           <button @click="emit('reset')" class="download-btn secondary">
             處理新影片
           </button>
         </div>
-        <div v-if="downloadError" class="download-error">{{ downloadError }}</div>
+        <!-- 下載進度條 -->
+        <div v-if="downloadState.isDownloading" class="download-progress-bar">
+          <div class="progress-fill" :style="{ width: `${downloadState.progress}%` }"></div>
+        </div>
+        <div v-if="downloadState.error" class="download-error">{{ downloadState.error }}</div>
       </div>
     </div>
 
@@ -370,6 +540,27 @@ h2 {
   height: auto;
 }
 
+.no-video-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: #888;
+  text-align: center;
+}
+
+.placeholder-icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+}
+
+.placeholder-hint {
+  font-size: 0.875rem;
+  color: #666;
+}
+
 /* 隱藏影片播放列的下載、播放速度和音量按鈕（音量由混音器控制） */
 .video-wrapper video::-webkit-media-controls-download-button,
 .video-wrapper video::-webkit-media-controls-playback-rate-button,
@@ -471,8 +662,33 @@ h2 {
   color: white;
 }
 
+.format-option.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #f0f0f0;
+}
+
+.format-option.disabled:hover {
+  border-color: #ddd;
+  background: #f0f0f0;
+}
+
 .format-option input {
   display: none;
+}
+
+.download-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #e0e0e0;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.download-progress-bar .progress-fill {
+  height: 100%;
+  background: #4caf50;
+  transition: width 0.3s ease;
 }
 
 .download-error {
@@ -506,6 +722,15 @@ h2 {
 
 .download-btn.primary:hover {
   background: #43a047;
+}
+
+.download-btn.export {
+  background: #9c27b0;
+  color: white;
+}
+
+.download-btn.export:hover {
+  background: #7b1fa2;
 }
 
 .download-btn.secondary {

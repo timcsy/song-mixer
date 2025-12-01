@@ -10,9 +10,9 @@
       <div class="list-header" v-if="showBatchActions">
         <label class="select-all">
           <input
+            ref="selectAllCheckbox"
             type="checkbox"
             :checked="allSelected"
-            :indeterminate="someSelected && !allSelected"
             @change="toggleSelectAll"
           />
           <span>{{ selectedCount }} 首已選</span>
@@ -25,9 +25,14 @@
           :job="job"
           :isSelected="job.id === selectedJobId"
           :isChecked="selectedJobIds.has(job.id)"
+          :selectedJobIds="selectedJobIds"
           @select="$emit('select', $event)"
           @toggle="$emit('toggle', $event)"
           @delete="$emit('delete', $event)"
+          @deleteSelected="$emit('deleteSelected')"
+          @export="$emit('export', $event)"
+          @exportSelected="$emit('exportSelected')"
+          @rename="(id, title) => $emit('rename', id, title)"
         />
       </div>
     </div>
@@ -35,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { CompletedJob } from '@/services/api'
 import SongItem from './SongItem.vue'
 import EmptyState from './EmptyState.vue'
@@ -57,15 +62,28 @@ const emit = defineEmits<{
   select: [jobId: string]
   toggle: [jobId: string]
   delete: [jobId: string]
+  deleteSelected: []
+  export: [jobId: string]
+  exportSelected: []
+  rename: [jobId: string, newTitle: string]
   selectAll: []
   deselectAll: []
 }>()
+
+const selectAllCheckbox = ref<HTMLInputElement | null>(null)
 
 const selectedCount = computed(() => props.selectedJobIds.size)
 const allSelected = computed(() =>
   props.jobs.length > 0 && props.selectedJobIds.size === props.jobs.length
 )
 const someSelected = computed(() => props.selectedJobIds.size > 0)
+
+// 更新 indeterminate 狀態
+watch([someSelected, allSelected], () => {
+  if (selectAllCheckbox.value) {
+    selectAllCheckbox.value.indeterminate = someSelected.value && !allSelected.value
+  }
+})
 
 function toggleSelectAll() {
   if (allSelected.value) {

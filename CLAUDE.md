@@ -87,6 +87,8 @@ cd frontend && npm run dev
 - 本地檔案系統 (`/data/`) (003-advanced-audio-mixer)
 - Python 3.11 (Backend) + TypeScript 5.3 (Frontend) + FastAPI, Pydantic, Vue 3, Vite, Tone.js (004-video-mixer)
 - 本地檔案系統 + 記憶體狀態（無資料庫） (004-video-mixer)
+- TypeScript 5.3 (Frontend) + Python 3.11 (Backend - 簡化後僅 YouTube 代理) (005-frontend-processing)
+- IndexedDB (前端持久化) (005-frontend-processing)
 
 ## Recent Changes
 - 003-advanced-audio-mixer: Added Python 3.11 (後端), TypeScript 5.3 (前端) + FastAPI, Vue 3, Demucs, FFmpeg (rubberband), Tone.js

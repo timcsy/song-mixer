@@ -1,72 +1,52 @@
+# 精簡版 Docker image - 僅 YouTube 下載代理
+# 所有媒體處理（FFmpeg、Demucs）皆在前端執行
+
 # Stage 1: Build frontend
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
-COPY frontend/package.json ./
-RUN npm install
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --production=false
 
 COPY frontend/ .
 RUN npm run build
 
-# Stage 2: Build backend dependencies
-FROM python:3.11-slim AS backend-builder
+# Stage 2: Final image (Alpine - 最小化)
+FROM python:3.11-alpine
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+# 安裝最小依賴
+RUN apk add --no-cache \
+    nginx \
+    supervisor \
+    curl
 
 WORKDIR /app
 
+# 安裝 Python 依賴
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Stage 3: Final image
-FROM python:3.11-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    git \
-    librubberband-dev \
-    libsndfile1 \
-    nginx \
-    supervisor \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Copy Python packages from backend-builder
-COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=backend-builder /usr/local/bin /usr/local/bin
-
-# Copy backend application
+# 複製後端（僅 YouTube 代理）
 COPY backend/app/ ./app/
 
-# Copy frontend build
+# 複製前端建置結果
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 
-# Copy configuration files
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+# 複製設定檔
+COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Remove default nginx config
-RUN rm -f /etc/nginx/sites-enabled/default
+# 建立暫存目錄（下載後立即刪除）
+RUN mkdir -p /tmp/youtube-downloads
 
-# Create data directories
-RUN mkdir -p /data/uploads /data/results && \
-    chmod -R 755 /data
-
-# Environment variables
-ENV DATA_DIR=/data
-ENV UPLOADS_DIR=/data/uploads
-ENV RESULTS_DIR=/data/results
-ENV DEVICE=cpu
+# 環境變數
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# 健康檢查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost/api/v1/health || exit 1
 
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

@@ -1,3 +1,7 @@
+"""
+YouTube Downloader Service
+精簡版 - 分離下載影片和音訊（不需要 FFmpeg）
+"""
 import logging
 import os
 import re
@@ -5,8 +9,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import yt_dlp
-
-from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -18,32 +20,12 @@ class YouTubeDownloader:
         r'^(https?://)?(www\.)?(youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)[a-zA-Z0-9_-]{11}'
     )
 
-    def __init__(self):
-        settings = get_settings()
-        self.max_duration = settings.max_video_duration
-
     def is_valid_url(self, url: str) -> bool:
-        """
-        驗證是否為有效的 YouTube 網址
-
-        Args:
-            url: YouTube 網址
-
-        Returns:
-            是否有效
-        """
+        """驗證是否為有效的 YouTube 網址"""
         return bool(self.YOUTUBE_URL_PATTERN.match(url))
 
     def get_video_info(self, url: str) -> dict:
-        """
-        取得影片資訊
-
-        Args:
-            url: YouTube 網址
-
-        Returns:
-            dict: 包含 title, duration, thumbnail
-        """
+        """取得影片資訊"""
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -56,61 +38,28 @@ class YouTubeDownloader:
                 'title': info.get('title', 'Unknown'),
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail', None),
-                'video_id': info.get('id', None)
             }
 
-    def download(
+    def download_separate(
         self,
         url: str,
         output_dir: str,
         progress_callback: Optional[Callable[[int, str], None]] = None
-    ) -> str:
+    ) -> tuple[str, str]:
         """
-        下載 YouTube 影片
-
-        Args:
-            url: YouTube 網址
-            output_dir: 輸出目錄
-            progress_callback: 進度回調函數 (progress, stage)
+        分離下載 YouTube 影片和音訊（不需要 FFmpeg）
 
         Returns:
-            下載的檔案路徑
-
-        Raises:
-            ValueError: 網址無效或影片過長
-            RuntimeError: 下載失敗
+            (video_path, audio_path) 元組
         """
         if not self.is_valid_url(url):
             raise ValueError("無效的 YouTube 網址")
 
-        # 取得影片資訊檢查時長
-        if progress_callback:
-            progress_callback(0, "取得影片資訊中...")
-
-        try:
-            info = self.get_video_info(url)
-            duration = info.get('duration', 0)
-
-            if duration > self.max_duration:
-                raise ValueError(f"影片長度 {duration} 秒超過限制 {self.max_duration} 秒")
-        except Exception as e:
-            logger.warning(f"無法取得影片資訊: {e}，繼續嘗試下載")
-
-        # 使用 yt-dlp 下載
-        logger.info(f"開始下載: {url}")
-        return self._download_with_ytdlp(url, output_dir, progress_callback)
-
-    def _download_with_ytdlp(
-        self,
-        url: str,
-        output_dir: str,
-        progress_callback: Optional[Callable[[int, str], None]] = None
-    ) -> str:
-        """使用 yt-dlp 下載影片"""
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        output_template = str(output_path / '%(id)s.%(ext)s')
+        video_id = self._extract_video_id(url)
+        current_phase = {'name': 'video', 'base': 0}
 
         def progress_hook(d):
             if progress_callback:
@@ -118,62 +67,93 @@ class YouTubeDownloader:
                     total = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
                     downloaded = d.get('downloaded_bytes', 0)
                     speed = d.get('speed', 0)
+                    eta = d.get('eta', 0)
 
                     if total > 0:
-                        percent = int((downloaded / total) * 100)
+                        phase_percent = (downloaded / total) * 100
+                        overall_percent = current_phase['base'] + int(phase_percent * 0.5)
+
                         dl_mb = downloaded / (1024 * 1024)
                         total_mb = total / (1024 * 1024)
-                        if speed:
-                            speed_mb = speed / (1024 * 1024)
-                            stage = f"下載中 {dl_mb:.1f}/{total_mb:.1f}MB ({speed_mb:.1f}MB/s)"
-                        else:
-                            stage = f"下載中 {dl_mb:.1f}/{total_mb:.1f}MB"
-                        progress_callback(percent, stage)
-                elif d['status'] == 'finished':
-                    progress_callback(95, "下載完成，處理中...")
+                        phase_name = "影片" if current_phase['name'] == 'video' else "音訊"
+                        msg_parts = [f"下載{phase_name} {dl_mb:.1f}/{total_mb:.1f} MB"]
 
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/bestvideo+bestaudio/best',
-            'outtmpl': output_template,
-            'quiet': False,
-            'no_warnings': False,
+                        if speed and speed > 0:
+                            msg_parts.append(f"{speed / (1024 * 1024):.1f} MB/s")
+                        if eta and eta > 0:
+                            if eta < 60:
+                                msg_parts.append(f"剩餘 {int(eta)} 秒")
+                            else:
+                                msg_parts.append(f"剩餘 {int(eta/60)}:{int(eta%60):02d}")
+
+                        progress_callback(overall_percent, " | ".join(msg_parts))
+                elif d['status'] == 'finished':
+                    msg = "影片下載完成" if current_phase['name'] == 'video' else "音訊下載完成"
+                    progress_callback(current_phase['base'] + 50, msg)
+
+        # 下載影片
+        current_phase['name'] = 'video'
+        current_phase['base'] = 0
+        if progress_callback:
+            progress_callback(0, "準備下載影片...")
+
+        video_opts = {
+            'format': 'bestvideo[ext=mp4][vcodec^=avc]/bestvideo[ext=mp4]/bestvideo',
+            'outtmpl': str(output_path / f'{video_id}_video.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
             'progress_hooks': [progress_hook],
-            'merge_output_format': 'mp4',
-            'ignore_no_formats_error': False,
         }
 
-        if progress_callback:
-            progress_callback(5, "開始下載...")
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        video_path = None
+        with yt_dlp.YoutubeDL(video_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            video_id = info['id']
-
-            # 方法 1: 直接從 info 取得檔案路徑
             if 'requested_downloads' in info and info['requested_downloads']:
-                filepath = info['requested_downloads'][0].get('filepath')
-                if filepath and os.path.exists(filepath):
-                    if progress_callback:
-                        progress_callback(100, "下載完成")
-                    return filepath
+                video_path = info['requested_downloads'][0].get('filepath')
 
-            # 方法 2: 搜尋輸出目錄中的檔案
-            for ext in ['mp4', 'mkv', 'webm', 'm4a', 'mp3']:
-                filepath = output_path / f"{video_id}.{ext}"
+        if not video_path or not os.path.exists(video_path):
+            for ext in ['mp4', 'webm', 'mkv']:
+                filepath = output_path / f"{video_id}_video.{ext}"
                 if filepath.exists():
-                    if progress_callback:
-                        progress_callback(100, "下載完成")
-                    return str(filepath)
+                    video_path = str(filepath)
+                    break
 
-            # 方法 3: 列出目錄中所有檔案找到最新的
-            files = list(output_path.glob('*.*'))
-            if files:
-                newest = max(files, key=lambda f: f.stat().st_mtime)
-                if progress_callback:
-                    progress_callback(100, "下載完成")
-                return str(newest)
+        # 下載音訊
+        current_phase['name'] = 'audio'
+        current_phase['base'] = 50
+        if progress_callback:
+            progress_callback(50, "準備下載音訊...")
 
-            raise RuntimeError(f"下載後找不到檔案，目錄: {output_path}")
+        audio_opts = {
+            'format': 'bestaudio[ext=m4a]/bestaudio',
+            'outtmpl': str(output_path / f'{video_id}_audio.%(ext)s'),
+            'quiet': True,
+            'no_warnings': True,
+            'progress_hooks': [progress_hook],
+        }
+
+        audio_path = None
+        with yt_dlp.YoutubeDL(audio_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if 'requested_downloads' in info and info['requested_downloads']:
+                audio_path = info['requested_downloads'][0].get('filepath')
+
+        if not audio_path or not os.path.exists(audio_path):
+            for ext in ['m4a', 'webm', 'mp3', 'ogg']:
+                filepath = output_path / f"{video_id}_audio.{ext}"
+                if filepath.exists():
+                    audio_path = str(filepath)
+                    break
+
+        if progress_callback:
+            progress_callback(100, "下載完成")
+
+        if not video_path:
+            raise RuntimeError("下載影片失敗")
+        if not audio_path:
+            raise RuntimeError("下載音訊失敗")
+
+        return video_path, audio_path
 
     def _extract_video_id(self, url: str) -> str:
         """從 URL 提取影片 ID"""
@@ -189,7 +169,6 @@ class YouTubeDownloader:
         return "video"
 
 
-# Global instance
 _downloader: Optional[YouTubeDownloader] = None
 
 

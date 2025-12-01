@@ -38,6 +38,8 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { api, type CompletedJob, type JobWithResult } from '@/services/api'
+import { storageService } from '@/services/storageService'
+import { getBackendCapabilities } from '@/services/api'
 import EmptyState from './EmptyState.vue'
 import ResultView from './ResultView.vue'
 
@@ -65,7 +67,45 @@ watch(() => props.selectedJob, async (newJob) => {
 
   loading.value = true
   try {
-    jobDetail.value = await api.getJob(newJob.id)
+    const backend = getBackendCapabilities()
+
+    // 優先從 IndexedDB 載入（純前端模式）
+    const localSong = await storageService.getSong(newJob.id)
+    if (localSong) {
+      // 將 IndexedDB 的 SongRecord 轉換為 JobWithResult 格式
+      jobDetail.value = {
+        id: localSong.id,
+        source_type: 'upload',
+        status: 'completed',
+        progress: 100,
+        current_stage: null,
+        error_message: null,
+        created_at: localSong.createdAt,
+        updated_at: localSong.createdAt,
+        result: {
+          original_duration: localSong.duration,
+          output_size: null,
+          download_url: null,
+        },
+        // 額外資訊給 ResultView 使用
+        source_title: localSong.title,
+        track_paths: localSong.tracks ? {
+          drums: 'indexeddb',
+          bass: 'indexeddb',
+          other: 'indexeddb',
+          vocals: 'indexeddb',
+        } : null,
+        sample_rate: 44100,
+        // 標記這是本地歌曲
+        _localSong: localSong,
+      } as JobWithResult & { _localSong: typeof localSong }
+    } else if (backend.available) {
+      // 後端模式：從 API 載入
+      jobDetail.value = await api.getJob(newJob.id)
+    } else {
+      console.error('Song not found in IndexedDB:', newJob.id)
+      jobDetail.value = null
+    }
   } catch (e) {
     console.error('Failed to load job detail:', e)
     jobDetail.value = null

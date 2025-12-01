@@ -6,10 +6,19 @@
     </div>
     <div class="task-progress">
       <div class="progress-bar">
-        <div class="progress-fill" :style="{ width: `${job.progress}%` }"></div>
+        <div class="progress-fill" :style="{ width: `${displayProgress}%` }"></div>
       </div>
-      <span class="progress-text">{{ job.progress }}%</span>
+      <span class="progress-text">{{ displayProgress }}%</span>
     </div>
+    <button
+      class="cancel-btn"
+      @click.stop="$emit('cancel', job.id)"
+      title="取消處理"
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M18 6L6 18M6 6l12 12" />
+      </svg>
+    </button>
   </div>
 </template>
 
@@ -25,7 +34,17 @@ const props = defineProps<Props>()
 
 defineEmits<{
   click: [jobId: string]
+  cancel: [jobId: string]
 }>()
+
+// 確保進度值有效
+const displayProgress = computed(() => {
+  const progress = props.job.progress
+  if (typeof progress !== 'number' || isNaN(progress) || !isFinite(progress)) {
+    return 0
+  }
+  return Math.round(Math.max(0, Math.min(100, progress)))
+})
 
 const statusText = computed(() => {
   if (props.job.current_stage) {
@@ -111,5 +130,24 @@ const statusText = computed(() => {
   color: #888;
   font-family: monospace;
   min-width: 32px;
+}
+
+.cancel-btn {
+  background: transparent;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.cancel-btn:hover {
+  background: #3d1a1a;
+  color: #ff6b6b;
 }
 </style>

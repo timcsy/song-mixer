@@ -9,6 +9,7 @@
         :key="job.id"
         :job="job"
         @click="handleTaskClick"
+        @cancel="handleTaskCancel"
       />
     </div>
   </div>
@@ -27,10 +28,15 @@ defineProps<Props>()
 
 const emit = defineEmits<{
   taskClick: [jobId: string]
+  taskCancel: [jobId: string]
 }>()
 
 function handleTaskClick(jobId: string) {
   emit('taskClick', jobId)
+}
+
+function handleTaskCancel(jobId: string) {
+  emit('taskCancel', jobId)
 }
 </script>
 

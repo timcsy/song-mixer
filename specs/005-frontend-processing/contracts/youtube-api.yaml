@@ -1,0 +1,268 @@
+openapi: 3.0.3
+info:
+  title: Sing YouTube Proxy API
+  description: |
+    簡化後的後端 API，僅提供 YouTube 下載代理功能。
+    此 API 僅在 Docker 部署模式下可用。
+  version: 2.0.0
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+paths:
+  /health:
+    get:
+      summary: 健康檢查
+      description: 用於前端偵測後端是否可用
+      operationId: healthCheck
+      responses:
+        '200':
+          description: 服務正常
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: 2.0.0
+                  features:
+                    type: object
+                    properties:
+                      youtube:
+                        type: boolean
+                        example: true
+                      ffmpeg:
+                        type: boolean
+                        example: true
+
+  /youtube/info:
+    get:
+      summary: 取得 YouTube 影片資訊
+      description: 使用 yt-dlp 取得影片元資料
+      operationId: getYoutubeInfo
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema:
+            type: string
+          description: YouTube 影片 URL
+          example: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+      responses:
+        '200':
+          description: 影片資訊
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YouTubeInfo'
+        '400':
+          description: 無效的 URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: 影片不存在或無法存取
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /youtube/download:
+    post:
+      summary: 下載 YouTube 影片並提取音頻
+      description: |
+        下載影片、提取音頻為 WAV (44.1kHz, 立體聲)，
+        回傳音頻資料供前端進行人聲分離。
+      operationId: downloadYoutube
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  description: YouTube 影片 URL
+                  example: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+      responses:
+        '200':
+          description: 音頻資料（WAV 格式）
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+          headers:
+            X-Video-Title:
+              schema:
+                type: string
+              description: URL 編碼的影片標題
+            X-Video-Duration:
+              schema:
+                type: number
+              description: 影片時長（秒）
+            X-Video-Thumbnail:
+              schema:
+                type: string
+              description: 縮圖 URL
+        '400':
+          description: 無效的請求
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: 影片受地區或年齡限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 影片過長（超過 10 分鐘限制）
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ffmpeg/extract-audio:
+    post:
+      summary: 從上傳的影片提取音頻
+      description: |
+        使用後端 FFmpeg 提取音頻（比 ffmpeg.wasm 快 5-10 倍）。
+        僅 Docker 模式可用。
+      operationId: extractAudio
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - video
+              properties:
+                video:
+                  type: string
+                  format: binary
+                  description: 影片檔案
+      responses:
+        '200':
+          description: 音頻資料（WAV 格式）
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+          headers:
+            X-Video-Duration:
+              schema:
+                type: number
+              description: 影片時長（秒）
+        '400':
+          description: 無效的影片格式
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: 檔案過大
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /ffmpeg/merge:
+    post:
+      summary: 合併影片與混音後音訊
+      description: |
+        使用後端 FFmpeg 合併影片與音訊。
+        僅 Docker 模式可用。
+      operationId: mergeVideoAudio
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - video
+                - audio
+                - format
+              properties:
+                video:
+                  type: string
+                  format: binary
+                  description: 原始影片
+                audio:
+                  type: string
+                  format: binary
+                  description: 混音後音訊（WAV）
+                format:
+                  type: string
+                  enum: [mp4, m4a]
+                  description: 輸出格式
+      responses:
+        '200':
+          description: 合併後的檔案
+          content:
+            video/mp4:
+              schema:
+                type: string
+                format: binary
+            audio/mp4:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: 'attachment; filename="output.mp4"'
+        '400':
+          description: 無效的輸入
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    YouTubeInfo:
+      type: object
+      properties:
+        title:
+          type: string
+          description: 影片標題
+          example: "Never Gonna Give You Up"
+        duration:
+          type: number
+          description: 時長（秒）
+          example: 212
+        thumbnail:
+          type: string
+          description: 縮圖 URL
+          example: "https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg"
+        uploader:
+          type: string
+          description: 上傳者
+          example: "Rick Astley"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: 錯誤代碼
+          example: "video_not_found"
+        message:
+          type: string
+          description: 錯誤訊息
+          example: "無法取得影片資訊"

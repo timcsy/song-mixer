@@ -13,17 +13,35 @@
         @select="$emit('select', $event)"
         @toggle="$emit('toggle', $event)"
         @delete="$emit('delete', $event)"
+        @deleteSelected="$emit('deleteSelected')"
+        @export="$emit('export', $event)"
+        @exportSelected="$emit('exportSelected')"
+        @rename="(id, title) => $emit('rename', id, title)"
         @selectAll="$emit('selectAll')"
         @deselectAll="$emit('deselectAll')"
       />
     </div>
 
     <div class="drawer-footer">
+      <!-- 儲存使用量顯示 -->
+      <div v-if="storageUsage" class="storage-info">
+        <div class="storage-bar">
+          <div
+            class="storage-fill"
+            :style="{ width: `${storagePercent}%` }"
+            :class="{ warning: storagePercent > 80, critical: storagePercent > 95 }"
+          ></div>
+        </div>
+        <span class="storage-text">
+          {{ formatBytes(storageUsage.used) }} / {{ formatBytes(storageUsage.quota) }}
+        </span>
+      </div>
+
       <button class="btn btn-primary" @click="$emit('addSong')">
         + 新增歌曲
       </button>
       <div class="export-actions" v-if="hasSelectedJobs">
-        <button class="btn btn-secondary" @click="$emit('export')">
+        <button class="btn btn-secondary" @click="$emit('exportSelected')">
           匯出 ({{ selectedCount }})
         </button>
       </div>
@@ -42,9 +60,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import type { CompletedJob } from '@/services/api'
 import SongList from './SongList.vue'
+import { storageService } from '@/services/storageService'
 
 interface Props {
   isOpen: boolean
@@ -63,15 +82,53 @@ defineEmits<{
   select: [jobId: string]
   toggle: [jobId: string]
   delete: [jobId: string]
+  deleteSelected: []
+  export: [jobId: string]
+  exportSelected: []
+  rename: [jobId: string, newTitle: string]
   selectAll: []
   deselectAll: []
   addSong: []
-  export: []
   import: []
 }>()
 
 const hasSelectedJobs = computed(() => props.selectedJobIds.size > 0)
 const selectedCount = computed(() => props.selectedJobIds.size)
+
+// 儲存使用量
+const storageUsage = ref<{ used: number; quota: number } | null>(null)
+
+const storagePercent = computed(() => {
+  if (!storageUsage.value || storageUsage.value.quota === 0) return 0
+  return Math.min(100, (storageUsage.value.used / storageUsage.value.quota) * 100)
+})
+
+// 格式化檔案大小
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB'
+}
+
+// 更新儲存使用量
+async function updateStorageUsage() {
+  try {
+    storageUsage.value = await storageService.getStorageUsage()
+  } catch (err) {
+    console.error('Failed to get storage usage:', err)
+  }
+}
+
+// 初始化時取得儲存使用量
+onMounted(() => {
+  updateStorageUsage()
+})
+
+// 當歌曲列表變化時更新儲存使用量
+watch(() => props.jobs.length, () => {
+  updateStorageUsage()
+})
 </script>
 
 <style scoped>
@@ -172,6 +229,42 @@ const selectedCount = computed(() => props.selectedJobIds.size)
 
 .export-actions .btn {
   flex: 1;
+}
+
+/* 儲存使用量 */
+.storage-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.storage-bar {
+  height: 6px;
+  background: #333;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.storage-fill {
+  height: 100%;
+  background: #4a9eff;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.storage-fill.warning {
+  background: #ff9800;
+}
+
+.storage-fill.critical {
+  background: #ff4444;
+}
+
+.storage-text {
+  font-size: 0.75rem;
+  color: #888;
+  text-align: right;
 }
 
 .drawer-overlay {

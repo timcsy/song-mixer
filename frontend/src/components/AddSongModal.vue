@@ -32,11 +32,17 @@
         <div class="tab-content">
           <!-- YouTube URL 輸入 -->
           <div v-if="activeTab === 'url'" class="url-input">
+            <!-- YouTube 功能不可用提示 -->
+            <div v-if="!backend.available || !backend.youtube" class="warning-message">
+              <p>YouTube 功能僅在 Docker 部署模式下可用。</p>
+              <p>請切換到「上傳檔案」標籤，上傳本地影片檔案。</p>
+            </div>
+
             <input
               v-model="youtubeUrl"
               type="text"
               placeholder="貼上 YouTube 網址..."
-              :disabled="isSubmitting"
+              :disabled="isSubmitting || !backend.youtube"
               @input="onUrlInput"
               @paste="onUrlPaste"
               @keyup.enter="submitUrl"
@@ -46,10 +52,11 @@
             <div v-if="youtubePreview" class="preview-card">
               <div class="video-container">
                 <iframe
-                  :src="`https://www.youtube.com/embed/${youtubePreview.videoId}`"
+                  :src="`https://www.youtube-nocookie.com/embed/${youtubePreview.videoId}`"
                   frameborder="0"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowfullscreen
+                  credentialless
                 ></iframe>
               </div>
               <div class="preview-info">
@@ -59,10 +66,10 @@
 
             <button
               class="submit-btn"
-              :disabled="!youtubeUrl || isSubmitting"
+              :disabled="!youtubeUrl || isSubmitting || !backend.youtube"
               @click="submitUrl"
             >
-              {{ isSubmitting ? '處理中...' : '開始處理' }}
+              {{ isSubmitting ? currentProgressLabel : '開始處理' }}
             </button>
           </div>
 
@@ -103,6 +110,28 @@
                 <p class="file-size">{{ formatFileSize(selectedFile.size) }}</p>
                 <button class="link-btn remove-btn" @click="clearFile">移除</button>
               </div>
+              <!-- 檔案大小警告 -->
+              <div v-if="fileSizeWarning" class="warning-message small">
+                {{ fileSizeWarning }}
+              </div>
+            </div>
+
+            <!-- 處理進度條 -->
+            <div v-if="isSubmitting && processingState.stage !== 'idle'" class="progress-container">
+              <!-- 主進度條 -->
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: `${safeProgress}%` }"></div>
+              </div>
+              <div class="progress-info">
+                <p class="progress-label">{{ currentProgressLabel }}</p>
+                <span class="progress-percent">{{ safeProgress }}%</span>
+              </div>
+              <!-- 子進度條（顯示當前子任務的細節進度） -->
+              <div v-if="showSubProgress" class="sub-progress">
+                <div class="sub-progress-bar">
+                  <div class="sub-progress-fill" :style="{ width: `${safeSubProgress}%` }"></div>
+                </div>
+              </div>
             </div>
 
             <button
@@ -110,7 +139,16 @@
               :disabled="!selectedFile || isSubmitting"
               @click="submitFile"
             >
-              {{ isSubmitting ? '上傳中...' : '開始處理' }}
+              {{ isSubmitting ? currentProgressLabel : '開始處理' }}
+            </button>
+
+            <!-- 取消按鈕 -->
+            <button
+              v-if="isSubmitting"
+              class="cancel-btn"
+              @click="handleCancel"
+            >
+              取消處理
             </button>
           </div>
         </div>
@@ -121,12 +159,18 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { api } from '@/services/api'
+import { getBackendCapabilities } from '@/services/api'
+import { useLocalProcessor } from '@/composables/useLocalProcessor'
+import { useJobManager } from '@/composables/useJobManager'
+import type { ProcessingState } from '@/types/storage'
 
 const emit = defineEmits<{
   close: []
   created: []
 }>()
+
+const { processUpload, processYouTube, state: processingState, cancel: cancelProcessing } = useLocalProcessor()
+const { refreshJobs } = useJobManager()
 
 const activeTab = ref<'url' | 'upload'>('url')
 const youtubeUrl = ref('')
@@ -136,6 +180,54 @@ const videoPreview = ref<HTMLVideoElement | null>(null)
 const isSubmitting = ref(false)
 const error = ref<string | null>(null)
 const isDragging = ref(false)
+
+// 後端功能偵測
+const backend = getBackendCapabilities()
+
+// 處理進度顯示 - 使用詳細的 message 欄位
+const currentProgressLabel = computed(() => {
+  const state = processingState.value
+  if (state.stage === 'idle') return ''
+
+  // 優先使用詳細訊息
+  if (state.message) {
+    return state.message
+  }
+
+  // 備用：基本階段標籤
+  const progressStageLabels: Record<ProcessingState['stage'], string> = {
+    idle: '',
+    downloading: '下載影片中',
+    extracting: '提取音頻中',
+    separating: '分離人聲中',
+    saving: '儲存中',
+  }
+  const label = progressStageLabels[state.stage]
+  return `${label}...`
+})
+
+// 安全取得進度值
+const safeProgress = computed(() => {
+  const progress = processingState.value.progress
+  if (typeof progress !== 'number' || isNaN(progress) || !isFinite(progress)) {
+    return 0
+  }
+  return Math.max(0, Math.min(100, Math.round(progress)))
+})
+
+// 安全取得子進度值
+const safeSubProgress = computed(() => {
+  const subProgress = processingState.value.subProgress
+  if (typeof subProgress !== 'number' || isNaN(subProgress) || !isFinite(subProgress)) {
+    return 0
+  }
+  return Math.max(0, Math.min(100, Math.round(subProgress)))
+})
+
+// 是否顯示子進度條
+const showSubProgress = computed(() => {
+  return processingState.value.subStage !== null && safeSubProgress.value > 0
+})
 
 // YouTube 預覽
 interface YouTubePreview {
@@ -256,33 +348,38 @@ function formatFileSize(bytes: number): string {
 async function submitUrl() {
   if (!youtubeUrl.value || isSubmitting.value) return
 
-  isSubmitting.value = true
-  error.value = null
-
-  try {
-    await api.createJobFromUrl(youtubeUrl.value)
-    emit('created')
-  } catch (e: any) {
-    error.value = e.message || '建立任務失敗'
-  } finally {
-    isSubmitting.value = false
+  // 檢查後端 YouTube 功能是否可用
+  if (!backend.available || !backend.youtube) {
+    error.value = 'YouTube 功能僅在 Docker 部署模式下可用。請上傳本地影片檔案，或自行從 YouTube 下載影片後上傳。'
+    return
   }
+
+  // 立即關閉 modal，讓處理在背景進行
+  emit('close')
+
+  // 使用本地處理流程（透過後端下載 YouTube）
+  processYouTube(youtubeUrl.value)
+    .then(() => refreshJobs())
+    .catch((e: any) => {
+      console.error('YouTube 處理失敗:', e.message || e)
+    })
 }
 
 async function submitFile() {
   if (!selectedFile.value || isSubmitting.value) return
 
-  isSubmitting.value = true
-  error.value = null
+  const file = selectedFile.value
+  const title = file.name.replace(/\.[^.]+$/, '') // 移除副檔名作為標題
 
-  try {
-    await api.createJobFromUpload(selectedFile.value)
-    emit('created')
-  } catch (e: any) {
-    error.value = e.message || '上傳失敗'
-  } finally {
-    isSubmitting.value = false
-  }
+  // 立即關閉 modal，讓處理在背景進行
+  emit('close')
+
+  // 使用本地處理流程（純前端）
+  processUpload(file, title)
+    .then(() => refreshJobs())
+    .catch((e: any) => {
+      console.error('檔案處理失敗:', e.message || e)
+    })
 }
 
 function handleFileSelect(event: Event) {
@@ -298,6 +395,22 @@ function handleDrop(event: DragEvent) {
     selectedFile.value = event.dataTransfer.files[0]
   }
 }
+
+// 取消處理
+function handleCancel() {
+  cancelProcessing()
+  isSubmitting.value = false
+}
+
+// 檢查檔案大小警告（100MB 軟限制）
+const fileSizeWarning = computed(() => {
+  if (!selectedFile.value) return null
+  const sizeMB = selectedFile.value.size / (1024 * 1024)
+  if (sizeMB > 100) {
+    return `檔案大小 ${sizeMB.toFixed(1)} MB 超過 100 MB，處理可能需要較長時間且佔用較多記憶體。`
+  }
+  return null
+})
 </script>
 
 <style scoped>
@@ -544,5 +657,113 @@ function handleDrop(event: DragEvent) {
 
 .remove-btn {
   font-size: 0.8rem;
+}
+
+/* 警告訊息 */
+.warning-message {
+  background: #3d3a1a;
+  color: #ffcc6b;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.warning-message p {
+  margin: 0;
+}
+
+.warning-message p + p {
+  margin-top: 0.25rem;
+}
+
+.warning-message.small {
+  font-size: 0.8rem;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+/* 進度條 */
+.progress-container {
+  margin-bottom: 1rem;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #2a2a2a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4a9eff 0%, #6ab4ff 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+
+.progress-label {
+  font-size: 0.8rem;
+  color: #e0e0e0;
+  margin: 0;
+  flex: 1;
+}
+
+.progress-percent {
+  font-size: 0.8rem;
+  color: #4a9eff;
+  font-weight: 500;
+  font-family: monospace;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* 子進度條 */
+.sub-progress {
+  margin-top: 0.5rem;
+}
+
+.sub-progress-bar {
+  width: 100%;
+  height: 4px;
+  background: #333;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.sub-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #6ab4ff 0%, #8eccff 100%);
+  border-radius: 2px;
+  transition: width 0.2s ease;
+  opacity: 0.7;
+}
+
+/* 取消按鈕 */
+.cancel-btn {
+  width: 100%;
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  border: 1px solid #666;
+  border-radius: 4px;
+  color: #888;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+  transition: all 0.15s;
+}
+
+.cancel-btn:hover {
+  background: #333;
+  color: #e0e0e0;
+  border-color: #888;
 }
 </style>
