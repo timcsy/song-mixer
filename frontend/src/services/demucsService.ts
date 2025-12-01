@@ -22,6 +22,63 @@ function isWebGPUSupported(): boolean {
 }
 
 /**
+ * 檢查是否為行動裝置
+ */
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false
+  const userAgent = navigator.userAgent || ''
+  const mobileRegex = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile|tablet/i
+  const isSmallScreen = typeof window !== 'undefined' && window.innerWidth < 768
+  const hasTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+  return mobileRegex.test(userAgent.toLowerCase()) || (isSmallScreen && hasTouch)
+}
+
+/**
+ * 取得裝置記憶體（GB）
+ * 僅 Chromium 瀏覽器支援，其他返回 undefined
+ */
+function getDeviceMemory(): number | undefined {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nav = navigator as any
+  return nav.deviceMemory
+}
+
+/**
+ * 判斷是否為低記憶體裝置
+ */
+function isLowMemoryDevice(): boolean {
+  const memory = getDeviceMemory()
+  // 4GB 以下視為低記憶體裝置
+  if (memory !== undefined && memory <= 4) {
+    return true
+  }
+  // 行動裝置預設視為低記憶體
+  return isMobileDevice()
+}
+
+/**
+ * 取得 ONNX Runtime Session Options
+ * 根據裝置類型自動調整記憶體設定
+ */
+function getSessionOptions(): Record<string, unknown> {
+  const isLowMem = isLowMemoryDevice()
+  const memory = getDeviceMemory()
+
+  if (isLowMem) {
+    console.log(`[Demucs] 偵測到低記憶體裝置 (${memory ?? '未知'} GB)，啟用記憶體優化模式`)
+    return {
+      // 關閉 CPU 記憶體競技場，避免預先分配大塊記憶體
+      enableCpuMemArena: false,
+      // 關閉記憶體模式優化，減少記憶體追蹤開銷
+      enableMemPattern: false,
+    }
+  }
+
+  console.log(`[Demucs] 裝置記憶體: ${memory ?? '未知'} GB，使用預設設定`)
+  return {}
+}
+
+/**
  * 配置 ONNX Runtime 執行提供者
  * 自動判斷是否使用 WebGPU
  */
@@ -87,10 +144,14 @@ class DemucsService {
       // 儲存下載進度回呼
       this.downloadProgressCallback = onDownloadProgress || null
 
+      // 取得適合裝置的 session options
+      const sessionOptions = getSessionOptions()
+
       // demucs-web 沒有完整的 TypeScript 定義，使用 any 繞過
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const processorOptions: any = {
         ort,
+        sessionOptions,
         // onProgress 接收物件 { progress, currentSegment, totalSegments }
         onProgress: (progressInfo: any) => {
           // 分離進度（非下載進度）
