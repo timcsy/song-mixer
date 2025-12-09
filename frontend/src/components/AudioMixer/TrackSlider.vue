@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { TRACK_LABELS, type TrackName, type TrackState } from '@/types/audio';
 
 const props = defineProps<{
@@ -9,8 +9,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:volume', value: number): void;
 }>();
-
-const sliderRef = ref<HTMLInputElement | null>(null);
 
 const label = computed(() => TRACK_LABELS[props.track.name]);
 
