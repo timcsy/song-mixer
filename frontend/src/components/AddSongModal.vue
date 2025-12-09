@@ -86,25 +86,33 @@
               <input
                 ref="fileInput"
                 type="file"
-                accept=".mp4,.mov,.avi,.mkv,.webm"
+                accept=".mp4,.mov,.avi,.mkv,.webm,.mp3,.wav,.flac,.aac,.m4a,.ogg,.wma,.aiff,.opus"
                 @change="handleFileSelect"
                 style="display: none"
               />
               <p>
-                拖放影片檔案到這裡<br>
+                拖放影片或音檔到這裡<br>
                 或 <button class="link-btn" @click="fileInput?.click()">選擇檔案</button>
               </p>
             </div>
 
             <!-- 檔案預覽 -->
             <div v-else class="file-preview">
+              <!-- 影片預覽 -->
               <video
+                v-if="!isAudioFile"
                 ref="videoPreview"
                 :src="filePreviewUrl"
                 class="preview-video"
                 controls
                 muted
               ></video>
+
+              <!-- 音檔預覽 -->
+              <div v-else class="audio-preview">
+                <audio :src="filePreviewUrl" controls class="preview-audio"></audio>
+              </div>
+
               <div class="file-info">
                 <p class="file-name">{{ selectedFile.name }}</p>
                 <p class="file-size">{{ formatFileSize(selectedFile.size) }}</p>
@@ -411,6 +419,16 @@ const fileSizeWarning = computed(() => {
   }
   return null
 })
+
+// 支援的音檔副檔名
+const audioExtensions = ['.mp3', '.wav', '.flac', '.aac', '.m4a', '.ogg', '.wma', '.aiff', '.opus']
+
+// 檢查是否為音檔
+const isAudioFile = computed(() => {
+  if (!selectedFile.value) return false
+  const name = selectedFile.value.name.toLowerCase()
+  return audioExtensions.some(ext => name.endsWith(ext))
+})
 </script>
 
 <style scoped>
@@ -628,6 +646,20 @@ const fileSizeWarning = computed(() => {
   max-height: 200px;
   background: #000;
   display: block;
+}
+
+/* 音檔預覽 */
+.audio-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  background: #1a1a1a;
+  padding: 1rem;
+}
+
+.preview-audio {
+  width: 100%;
 }
 
 .file-info {

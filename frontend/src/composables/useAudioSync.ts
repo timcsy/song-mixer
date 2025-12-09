@@ -29,6 +29,27 @@ export function useAudioSync(options: UseAudioSyncOptions): UseAudioSyncReturn {
   const syncEnabled = ref(false);
   let isUserSeeking = false;
 
+  // 處理頁面可見性變化 - 恢復 video 同步
+  const handleVisibilityChange = async () => {
+    if (!syncEnabled.value) return;
+    const video = videoElement.value;
+    if (!video) return;
+
+    if (!document.hidden) {
+      // 頁面可見 - 如果 audio 正在播放，同步 video 並繼續播放
+      if (isPlaying.value && video.paused) {
+        // 將 video 時間同步到 audio 當前時間
+        video.currentTime = currentTime.value;
+        video.muted = true;
+        try {
+          await video.play();
+        } catch (e) {
+          console.warn('無法恢復 video 播放:', e);
+        }
+      }
+    }
+  };
+
   // 影片事件處理
   const handlePlay = async () => {
     if (!syncEnabled.value) return;
@@ -39,6 +60,10 @@ export function useAudioSync(options: UseAudioSyncOptions): UseAudioSyncReturn {
 
   const handlePause = () => {
     if (!syncEnabled.value) return;
+    // 如果頁面隱藏，不要暫停音訊（支援背景播放）
+    if (document.hidden) return;
+    // 如果正在 seeking，不要暫停音訊
+    if (isUserSeeking) return;
     if (isPlaying.value) {
       pause();
     }
@@ -62,9 +87,12 @@ export function useAudioSync(options: UseAudioSyncOptions): UseAudioSyncReturn {
     const video = videoElement.value;
     if (!video || isUserSeeking) return;
 
+    // 如果頁面隱藏或 video 正在 seeking，不進行時間同步
+    if (document.hidden || video.seeking) return;
+
     // 檢查時間差，若差異過大則同步
     const timeDiff = Math.abs(video.currentTime - currentTime.value);
-    if (timeDiff > 0.3 && isPlaying.value) {
+    if (timeDiff > 0.3 && isPlaying.value && !video.paused) {
       seek(video.currentTime);
     }
   };
@@ -96,6 +124,9 @@ export function useAudioSync(options: UseAudioSyncOptions): UseAudioSyncReturn {
     if (video) {
       bindVideoEvents(video);
     }
+
+    // 註冊頁面可見性事件
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   };
 
   // 停用同步
@@ -106,6 +137,9 @@ export function useAudioSync(options: UseAudioSyncOptions): UseAudioSyncReturn {
     if (video) {
       unbindVideoEvents(video);
     }
+
+    // 移除頁面可見性事件
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   };
 
   // 監聽影片元素變化
@@ -125,6 +159,7 @@ export function useAudioSync(options: UseAudioSyncOptions): UseAudioSyncReturn {
     if (video) {
       unbindVideoEvents(video);
     }
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
   });
 
   return {

@@ -176,9 +176,20 @@ function parseWavToStereo(wavBuffer: ArrayBuffer): {
 // 重命名為 formatSize 以便內部使用
 const formatSize = formatFileSize
 
+// 支援的音檔副檔名
+const AUDIO_EXTENSIONS = ['.mp3', '.wav', '.flac', '.aac', '.m4a', '.ogg', '.wma', '.aiff', '.opus']
+
 /**
- * 處理本地上傳的影片檔案
- * @param file 影片檔案
+ * 檢查檔案是否為音檔
+ */
+function isAudioFile(file: File): boolean {
+  const name = file.name.toLowerCase()
+  return AUDIO_EXTENSIONS.some(ext => name.endsWith(ext))
+}
+
+/**
+ * 處理本地上傳的影片或音檔
+ * @param file 影片或音檔
  * @param title 歌曲標題
  * @param options 處理選項
  * @returns 新建立的 SongRecord.id
@@ -191,6 +202,9 @@ async function processUpload(
   resetState()
   currentTitle.value = title
   state.value.sourceType = 'upload'
+
+  // 檢測檔案類型
+  const isAudio = isAudioFile(file)
 
   try {
     // 確保儲存服務已初始化
@@ -209,8 +223,9 @@ async function processUpload(
     }
 
     const fileSizeStr = formatSize(file.size)
+    let wavBuffer: ArrayBuffer
 
-    // ========== 階段 1：提取音頻 (0-25%) ==========
+    // ========== 階段 1：提取/轉換音頻 (0-25%) ==========
     updateState({
       stage: 'extracting',
       subStage: 'ffmpeg_loading',
@@ -233,23 +248,43 @@ async function processUpload(
       })
     }
 
-    updateState({
-      subStage: 'ffmpeg_extracting',
-      progress: 10,
-      subProgress: 0,
-      message: `提取音頻 - ${fileSizeStr} (0%)`,
-    }, options)
-    checkCancelled()
-
-    // 提取音頻
-    const wavBuffer = await ffmpegService.extractAudio(file, (p) => {
-      const subProg = sanitizeProgress(p * 100)
+    if (isAudio) {
+      // 音檔：轉換格式
       updateState({
-        subProgress: subProg,
-        message: `提取音頻 - ${fileSizeStr} (${subProg}%)`,
-        progress: sanitizeProgress(10 + p * 15), // 10-25%
+        subStage: 'ffmpeg_extracting',
+        progress: 10,
+        subProgress: 0,
+        message: `轉換音檔格式 - ${fileSizeStr} (0%)`,
       }, options)
-    })
+      checkCancelled()
+
+      wavBuffer = await ffmpegService.convertToWav(file, (p) => {
+        const subProg = sanitizeProgress(p * 100)
+        updateState({
+          subProgress: subProg,
+          message: `轉換音檔格式 - ${fileSizeStr} (${subProg}%)`,
+          progress: sanitizeProgress(10 + p * 15), // 10-25%
+        }, options)
+      })
+    } else {
+      // 影片：提取音頻
+      updateState({
+        subStage: 'ffmpeg_extracting',
+        progress: 10,
+        subProgress: 0,
+        message: `提取音頻 - ${fileSizeStr} (0%)`,
+      }, options)
+      checkCancelled()
+
+      wavBuffer = await ffmpegService.extractAudio(file, (p) => {
+        const subProg = sanitizeProgress(p * 100)
+        updateState({
+          subProgress: subProg,
+          message: `提取音頻 - ${fileSizeStr} (${subProg}%)`,
+          progress: sanitizeProgress(10 + p * 15), // 10-25%
+        }, options)
+      })
+    }
 
     updateState({ progress: 25 }, options)
     checkCancelled()
@@ -345,12 +380,15 @@ async function processUpload(
       separationResult.vocals.left,
       separationResult.vocals.right
     )
-    const videoBuffer = await file.arrayBuffer()
+
+    // 音檔不儲存原始檔案（無影片）
+    const videoBuffer = isAudio ? undefined : await file.arrayBuffer()
 
     // 計算儲存大小（顯示為 WAV 匯出大小：PCM + 4 個 WAV header）
     const wavHeaderSize = 44 * 4 // 4 音軌，每個 WAV header 44 bytes
     const storageSize = drumsBuffer.byteLength + bassBuffer.byteLength +
-      otherBuffer.byteLength + vocalsBuffer.byteLength + videoBuffer.byteLength + wavHeaderSize
+      otherBuffer.byteLength + vocalsBuffer.byteLength +
+      (videoBuffer?.byteLength ?? 0) + wavHeaderSize
 
     const song: SongRecord = {
       id: songId,
@@ -370,10 +408,10 @@ async function processUpload(
     }
 
     updateState({
-      subStage: 'saving_video',
+      subStage: isAudio ? 'saving_tracks' : 'saving_video',
       progress: 95,
       subProgress: 50,
-      message: '儲存影片資料...',
+      message: isAudio ? '儲存音軌資料...' : '儲存影片資料...',
     }, options)
 
     await storageService.saveSong(song)

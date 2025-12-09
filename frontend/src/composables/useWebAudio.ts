@@ -87,6 +87,76 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
   let pitchShifter: Tone.PitchShift | null = null;
   let masterGain: Tone.Gain | null = null;
   let animationFrame: number | null = null;
+  let timeUpdateInterval: number | null = null;
+
+  // 用於背景播放的隱藏 audio 元素（播放靜音音訊來防止瀏覽器暫停 AudioContext）
+  let silentAudio: HTMLAudioElement | null = null;
+
+  // 設置背景播放支援（使用 MediaStream 連接到 audio 元素）
+  let mediaStreamDestination: MediaStreamAudioDestinationNode | null = null;
+
+  const setupBackgroundPlayback = async () => {
+    try {
+      const rawContext = Tone.getContext().rawContext as AudioContext;
+
+      // 創建一個持續播放極小音量噪音的 oscillator 連接到 MediaStreamDestination
+      mediaStreamDestination = rawContext.createMediaStreamDestination();
+
+      // 創建一個極低頻率、極小音量的 oscillator（人耳幾乎聽不到）
+      const oscillator = rawContext.createOscillator();
+      const gainNode = rawContext.createGain();
+      oscillator.frequency.value = 1; // 1Hz - 人耳聽不到的頻率
+      gainNode.gain.value = 0.001; // 極小音量
+      oscillator.connect(gainNode);
+      gainNode.connect(mediaStreamDestination);
+      oscillator.start();
+
+      // 創建 audio 元素並連接到 MediaStream
+      silentAudio = document.createElement('audio');
+      silentAudio.id = 'background-audio-keepalive';
+      silentAudio.srcObject = mediaStreamDestination.stream;
+      silentAudio.volume = 1; // 需要有音量才能讓瀏覽器認為在播放
+
+      // 將 audio 元素加入 DOM
+      silentAudio.style.display = 'none';
+      document.body.appendChild(silentAudio);
+
+      // 監聯聽 audio 元素的狀態
+      // 注意：只有在 isPlaying 為 true 時才恢復，避免用戶主動暫停後又被自動恢復
+      silentAudio.addEventListener('pause', async () => {
+        // 只有當用戶想要播放（isPlaying.value === true）但 Transport 被暫停時才恢復
+        // 這表示是瀏覽器強制暫停，而不是用戶主動暫停
+        if (!isPlaying.value) {
+          return;
+        }
+
+        const transport = Tone.getTransport();
+        if (transport.state === 'paused' || transport.state === 'stopped') {
+          try {
+            // 先恢復 AudioContext
+            if (rawContext.state !== 'running') {
+              await rawContext.resume();
+            }
+
+            // 強制恢復 Transport
+            transport.start();
+
+            // 重新播放 audio 元素
+            if (silentAudio) {
+              await silentAudio.play();
+            }
+          } catch (e) {
+            // 忽略恢復失敗
+          }
+        }
+      });
+
+      return true;
+    } catch (e) {
+      console.warn('無法設置背景播放:', e);
+      return false;
+    }
+  };
 
   // Computed
   const isReady = computed(() => {
@@ -101,7 +171,78 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     if (isPlaying.value && players.drums) {
       const transport = Tone.getTransport();
       currentTime.value = transport.seconds;
-      animationFrame = requestAnimationFrame(updateTime);
+      // 只在頁面可見時使用 requestAnimationFrame
+      if (!document.hidden) {
+        animationFrame = requestAnimationFrame(updateTime);
+      }
+    }
+  };
+
+  // 處理 AudioContext 狀態變化（背景播放支援）
+  const handleAudioContextStateChange = async () => {
+    // 僅用於監控，不需要 log
+  };
+
+  // 處理頁面可見性變化（背景播放支援）
+  const handleVisibilityChange = async () => {
+    if (document.hidden) {
+      // 頁面隱藏 - 停止 requestAnimationFrame（音訊會在背景繼續播放）
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+
+      // 使用 setInterval 更新時間（背景中可能不執行）
+      if (isPlaying.value && !timeUpdateInterval) {
+        timeUpdateInterval = window.setInterval(() => {
+          if (isPlaying.value && players.drums) {
+            currentTime.value = Tone.getTransport().seconds;
+          }
+        }, 100);
+      }
+
+      // 確保 AudioContext 和 Transport 繼續運行
+      // 使用持續的 interval 來恢復音訊（瀏覽器可能會多次嘗試暫停）
+      if (isPlaying.value) {
+        const keepAliveInterval = setInterval(async () => {
+          // 如果頁面變成可見或用戶暫停，停止 interval
+          if (!document.hidden || !isPlaying.value) {
+            clearInterval(keepAliveInterval);
+            return;
+          }
+
+          const rawContext = Tone.getContext().rawContext as AudioContext;
+          const transport = Tone.getTransport();
+
+          try {
+            if (rawContext.state === 'suspended') {
+              await rawContext.resume();
+            }
+
+            if (transport.state !== 'started') {
+              transport.start();
+            }
+
+            if (silentAudio && silentAudio.paused) {
+              await silentAudio.play();
+            }
+          } catch (e) {
+            // 忽略錯誤
+          }
+        }, 200); // 每 200ms 檢查一次
+      }
+    } else {
+      // 頁面可見 - 恢復 UI 更新
+      if (timeUpdateInterval) {
+        clearInterval(timeUpdateInterval);
+        timeUpdateInterval = null;
+      }
+
+      // 同步當前時間（背景播放期間時間已經前進）
+      if (isPlaying.value) {
+        currentTime.value = Tone.getTransport().seconds;
+        updateTime();
+      }
     }
   };
 
@@ -110,6 +251,37 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     if (animationFrame) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
+    }
+
+    // 清理背景播放 interval
+    if (timeUpdateInterval) {
+      clearInterval(timeUpdateInterval);
+      timeUpdateInterval = null;
+    }
+
+    // 移除頁面可見性事件監聽器
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+
+    // 移除 AudioContext 狀態變化事件監聯聽器
+    try {
+      const rawContext = Tone.getContext().rawContext as AudioContext;
+      rawContext.removeEventListener('statechange', handleAudioContextStateChange);
+    } catch (e) {
+      // 忽略錯誤
+    }
+
+    // 清理背景播放音訊元素
+    if (silentAudio) {
+      silentAudio.pause();
+      silentAudio.srcObject = null;
+      if (silentAudio.parentNode) {
+        silentAudio.parentNode.removeChild(silentAudio);
+      }
+      silentAudio = null;
+    }
+    if (mediaStreamDestination) {
+      mediaStreamDestination.disconnect();
+      mediaStreamDestination = null;
     }
 
     const transport = Tone.getTransport();
@@ -238,13 +410,40 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
       // Ensure AudioContext is started
       await Tone.start();
 
+      // 註冊頁面可見性變化事件（支援背景播放）
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      // 註冊 AudioContext 狀態變化事件
+      const rawContext = Tone.getContext().rawContext as AudioContext;
+      rawContext.addEventListener('statechange', handleAudioContextStateChange);
+
+      // 設定 Media Session API（幫助瀏覽器識別這是媒體播放器）
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: localSongRecord.value?.title || '音樂混音器',
+          artist: 'Song Mixer',
+          album: 'Local Library',
+        });
+
+        navigator.mediaSession.setActionHandler('play', () => {
+          play();
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          pause();
+        });
+        navigator.mediaSession.setActionHandler('stop', () => {
+          stop();
+        });
+      }
+
       // Create master gain (主音量控制)
       masterGain = new Tone.Gain(masterVolume.value).toDestination();
 
       // Create pitch shifter (shared by all tracks)
+      // windowSize 越小延遲越低，但音質可能略差
       pitchShifter = new Tone.PitchShift({
         pitch: pitchShift.value,
-        windowSize: 0.1,
+        windowSize: 0.05,
         delayTime: 0,
       }).connect(masterGain);
 
@@ -280,6 +479,24 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
       const transport = Tone.getTransport();
       transport.start();
       isPlaying.value = true;
+
+      // 啟動背景播放支援
+      if (!silentAudio) {
+        await setupBackgroundPlayback();
+      }
+      if (silentAudio) {
+        try {
+          await silentAudio.play();
+        } catch (e) {
+          // 忽略背景音訊播放失敗
+        }
+      }
+
+      // 更新 Media Session 播放狀態
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'playing';
+      }
+
       updateTime();
     } catch (err) {
       error.value = '播放失敗';
@@ -291,6 +508,17 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     const transport = Tone.getTransport();
     transport.pause();
     isPlaying.value = false;
+
+    // 暫停靜音音訊
+    if (silentAudio) {
+      silentAudio.pause();
+    }
+
+    // 更新 Media Session 播放狀態
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'paused';
+    }
+
     if (animationFrame) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
@@ -304,6 +532,17 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     transport.seconds = 0;
     currentTime.value = 0;
     isPlaying.value = false;
+
+    // 停止靜音音訊
+    if (silentAudio) {
+      silentAudio.pause();
+      silentAudio.currentTime = 0;
+    }
+
+    // 更新 Media Session 播放狀態
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+    }
     if (animationFrame) {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;

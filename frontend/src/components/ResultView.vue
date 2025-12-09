@@ -327,7 +327,34 @@ const durationText = computed(() => {
             <div v-else class="no-video-placeholder">
               <div class="placeholder-icon">🎵</div>
               <p>純音訊模式</p>
-              <p class="placeholder-hint">使用右側混音器控制播放</p>
+              <!-- 純音訊播放控制 -->
+              <div v-if="audioMixerRef" class="audio-playback-controls">
+                <div class="audio-controls-row">
+                  <button class="audio-control-btn" @click="audioMixerRef.stop?.()" :disabled="!audioMixerRef.isReady">
+                    <span>&#9632;</span>
+                  </button>
+                  <button class="audio-control-btn play" @click="audioMixerRef.togglePlay?.()" :disabled="!audioMixerRef.isReady">
+                    <span>{{ audioMixerRef.isPlaying ? '&#10074;&#10074;' : '&#9654;' }}</span>
+                  </button>
+                </div>
+                <div class="audio-time-display">
+                  {{ audioMixerRef.formatTime?.(audioMixerRef.currentTime ?? 0) ?? '0:00' }}
+                  /
+                  {{ audioMixerRef.formatTime?.(audioMixerRef.duration ?? 0) ?? '0:00' }}
+                </div>
+                <div class="audio-seek-container">
+                  <input
+                    type="range"
+                    class="audio-seek-slider"
+                    min="0"
+                    :max="audioMixerRef.duration ?? 0"
+                    step="0.1"
+                    :value="audioMixerRef.currentTime ?? 0"
+                    @input="(e) => audioMixerRef.seek?.((e.target as HTMLInputElement).valueAsNumber)"
+                    :disabled="!audioMixerRef.isReady"
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -345,7 +372,7 @@ const durationText = computed(() => {
             @ready="handleMixerReady"
             @error="handleMixerError"
             hide-download
-            :hide-playback-controls="!!streamUrl"
+            hide-playback-controls
           />
           <div v-else class="mixer-loading">
             <div class="loading-spinner"></div>
@@ -544,6 +571,7 @@ h2 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  width: 100%;
   height: 100%;
   min-height: 200px;
   color: #888;
@@ -558,6 +586,92 @@ h2 {
 .placeholder-hint {
   font-size: 0.875rem;
   color: #666;
+}
+
+/* 純音訊播放控制 */
+.audio-playback-controls {
+  margin-top: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  padding: 0 3rem;
+  box-sizing: border-box;
+}
+
+.audio-controls-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.audio-control-btn {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid #666;
+  background: transparent;
+  color: #888;
+  font-size: 1.25rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.audio-control-btn:hover:not(:disabled) {
+  border-color: #4a90d9;
+  color: #4a90d9;
+}
+
+.audio-control-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.audio-control-btn.play {
+  width: 56px;
+  height: 56px;
+  font-size: 1.5rem;
+}
+
+.audio-time-display {
+  font-size: 0.875rem;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+}
+
+.audio-seek-container {
+  width: 100%;
+}
+
+.audio-seek-slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #444;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.audio-seek-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #4a90d9;
+  cursor: pointer;
+}
+
+.audio-seek-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #4a90d9;
+  border: none;
+  cursor: pointer;
 }
 
 /* 隱藏影片播放列的下載、播放速度和音量按鈕（音量由混音器控制） */

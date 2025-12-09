@@ -275,16 +275,6 @@ defineExpose({
           <button class="control-btn play-btn" @click="togglePlay" :disabled="!isReady">
             <span class="btn-icon">{{ isPlaying ? '&#10074;&#10074;' : '&#9654;' }}</span>
           </button>
-          <button
-            class="guide-vocals-btn"
-            :class="{ active: guideVocalsEnabled }"
-            @click="toggleGuideVocals"
-            :disabled="!isReady"
-            title="導唱功能"
-          >
-            <span class="guide-icon">&#127908;</span>
-            <span class="guide-label">{{ guideVocalsEnabled ? '關閉導唱' : '開啟導唱' }}</span>
-          </button>
         </div>
 
         <!-- Time display and seek -->
