@@ -110,7 +110,6 @@
 
               <!-- 音檔預覽 -->
               <div v-else class="audio-preview">
-                <div class="audio-icon">🎵</div>
                 <audio :src="filePreviewUrl" controls class="preview-audio"></audio>
               </div>
 
@@ -652,20 +651,15 @@ const isAudioFile = computed(() => {
 /* 音檔預覽 */
 .audio-preview {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  padding: 2rem;
+  justify-content: center;
+  min-height: 150px;
   background: #1a1a1a;
-}
-
-.audio-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+  padding: 1rem;
 }
 
 .preview-audio {
   width: 100%;
-  max-width: 300px;
 }
 
 .file-info {
