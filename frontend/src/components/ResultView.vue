@@ -350,7 +350,7 @@ const durationText = computed(() => {
                     :max="audioMixerRef.duration ?? 0"
                     step="0.1"
                     :value="audioMixerRef.currentTime ?? 0"
-                    @input="(e) => audioMixerRef.seek?.((e.target as HTMLInputElement).valueAsNumber)"
+                    @input="(e) => audioMixerRef?.seek?.((e.target as HTMLInputElement).valueAsNumber)"
                     :disabled="!audioMixerRef.isReady"
                   />
                 </div>
