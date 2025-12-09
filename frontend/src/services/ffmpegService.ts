@@ -132,6 +132,56 @@ class FFmpegService {
   }
 
   /**
+   * 將音檔轉換為 WAV 格式
+   * @param audioBlob 音檔 Blob（支援 MP3、FLAC、AAC、OGG 等格式）
+   * @param onProgress 進度回呼
+   * @returns WAV ArrayBuffer (44.1kHz, 立體聲, 16-bit PCM)
+   */
+  async convertToWav(
+    audioBlob: Blob,
+    onProgress?: (progress: number) => void
+  ): Promise<ArrayBuffer> {
+    if (!this.ffmpeg || !this.ffmpeg.isLoaded()) {
+      await this.initialize()
+    }
+
+    if (!this.ffmpeg) {
+      throw new Error('FFmpeg 初始化失敗')
+    }
+
+    this.progressCallback = onProgress || null
+
+    try {
+      // 寫入輸入檔案（使用通用檔名，FFmpeg 會自動偵測格式）
+      const inputData = await FFmpeg.fetchFile(audioBlob)
+      this.ffmpeg.FS('writeFile', 'input_audio', inputData)
+
+      // 執行轉換：音檔 → WAV (44.1kHz, 立體聲, 16-bit PCM)
+      await this.ffmpeg.run(
+        '-i', 'input_audio',
+        '-vn',
+        '-acodec', 'pcm_s16le',
+        '-ar', '44100',
+        '-ac', '2',
+        'output.wav'
+      )
+
+      // 讀取輸出
+      const outputData = this.ffmpeg.FS('readFile', 'output.wav')
+
+      // 清理暫存檔案
+      this.ffmpeg.FS('unlink', 'input_audio')
+      this.ffmpeg.FS('unlink', 'output.wav')
+
+      return outputData.buffer
+    } catch (error) {
+      throw new Error(`音檔轉換失敗: ${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      this.progressCallback = null
+    }
+  }
+
+  /**
    * 將 WAV 編碼為 MP3
    * @returns MP3 Blob
    */

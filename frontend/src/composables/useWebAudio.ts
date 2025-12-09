@@ -87,6 +87,7 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
   let pitchShifter: Tone.PitchShift | null = null;
   let masterGain: Tone.Gain | null = null;
   let animationFrame: number | null = null;
+  let timeUpdateInterval: number | null = null;
 
   // Computed
   const isReady = computed(() => {
@@ -101,7 +102,37 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     if (isPlaying.value && players.drums) {
       const transport = Tone.getTransport();
       currentTime.value = transport.seconds;
-      animationFrame = requestAnimationFrame(updateTime);
+      // 只在頁面可見時使用 requestAnimationFrame
+      if (!document.hidden) {
+        animationFrame = requestAnimationFrame(updateTime);
+      }
+    }
+  };
+
+  // 處理頁面可見性變化（背景播放支援）
+  const handleVisibilityChange = () => {
+    if (!isPlaying.value) return;
+
+    if (document.hidden) {
+      // 頁面隱藏 - 改用 setInterval（100ms 更新一次）
+      if (animationFrame) {
+        cancelAnimationFrame(animationFrame);
+        animationFrame = null;
+      }
+      timeUpdateInterval = window.setInterval(() => {
+        if (isPlaying.value && players.drums) {
+          currentTime.value = Tone.getTransport().seconds;
+        }
+      }, 100);
+    } else {
+      // 頁面可見 - 恢復 requestAnimationFrame
+      if (timeUpdateInterval) {
+        clearInterval(timeUpdateInterval);
+        timeUpdateInterval = null;
+      }
+      if (isPlaying.value) {
+        updateTime();
+      }
     }
   };
 
@@ -111,6 +142,15 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
       cancelAnimationFrame(animationFrame);
       animationFrame = null;
     }
+
+    // 清理背景播放 interval
+    if (timeUpdateInterval) {
+      clearInterval(timeUpdateInterval);
+      timeUpdateInterval = null;
+    }
+
+    // 移除頁面可見性事件監聽器
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
 
     const transport = Tone.getTransport();
     transport.stop();
@@ -237,6 +277,9 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     try {
       // Ensure AudioContext is started
       await Tone.start();
+
+      // 註冊頁面可見性變化事件（支援背景播放）
+      document.addEventListener('visibilitychange', handleVisibilityChange);
 
       // Create master gain (主音量控制)
       masterGain = new Tone.Gain(masterVolume.value).toDestination();
