@@ -5,6 +5,20 @@
     @click="handleClick"
     @contextmenu.prevent="showContextMenu"
   >
+    <!-- 拖曳把手：只有按住這裡才能拖曳，避免與點選、改名、捲動衝突 -->
+    <span
+      v-if="draggable"
+      class="drag-handle"
+      title="拖曳調整順序"
+      aria-label="拖曳調整順序"
+      @click.stop
+    >
+      <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">
+        <circle cx="2.5" cy="3" r="1.5" /><circle cx="7.5" cy="3" r="1.5" />
+        <circle cx="2.5" cy="8" r="1.5" /><circle cx="7.5" cy="8" r="1.5" />
+        <circle cx="2.5" cy="13" r="1.5" /><circle cx="7.5" cy="13" r="1.5" />
+      </svg>
+    </span>
     <input
       type="checkbox"
       :checked="isChecked"
@@ -58,6 +72,15 @@
         <button class="context-menu-item" @click="handleContextRename">
           重新命名
         </button>
+        <template v-if="draggable">
+          <button class="context-menu-item" @click="handleContextMove('top')">
+            {{ hasMultipleSelected ? `將 ${selectedCount} 首移到最上面` : '移到最上面' }}
+          </button>
+          <button class="context-menu-item" @click="handleContextMove('bottom')">
+            {{ hasMultipleSelected ? `將 ${selectedCount} 首移到最下面` : '移到最下面' }}
+          </button>
+          <div class="context-menu-divider"></div>
+        </template>
         <button class="context-menu-item" @click="handleContextExport">
           {{ hasMultipleSelected ? `匯出 ${selectedCount} 首` : '匯出' }}
         </button>
@@ -86,6 +109,8 @@ interface Props {
   isChecked?: boolean
   showDelete?: boolean
   selectedJobIds?: ReadonlySet<string>
+  /** 是否顯示拖曳把手與移動選項 */
+  draggable?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -93,6 +118,7 @@ const props = withDefaults(defineProps<Props>(), {
   isChecked: false,
   showDelete: true,
   selectedJobIds: () => new Set(),
+  draggable: false,
 })
 
 const emit = defineEmits<{
@@ -103,6 +129,7 @@ const emit = defineEmits<{
   export: [jobId: string]
   exportSelected: []
   rename: [jobId: string, newTitle: string]
+  move: [jobIds: string[], position: 'top' | 'bottom']
 }>()
 
 // 計算是否有多選
@@ -170,6 +197,12 @@ function handleContextRename() {
   startEdit()
 }
 
+function handleContextMove(position: 'top' | 'bottom') {
+  hideContextMenu()
+  const ids = hasMultipleSelected.value ? [...props.selectedJobIds] : [props.job.id]
+  emit('move', ids, position)
+}
+
 function handleContextExport() {
   hideContextMenu()
   if (hasMultipleSelected.value) {
@@ -210,6 +243,29 @@ function handleContextDelete() {
 
 .song-item.checked {
   background-color: #2d3748;
+}
+
+.drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 20px;
+  margin: -0.75rem 0.25rem -0.75rem -0.75rem;
+  padding: 0 0.25rem;
+  color: #555;
+  cursor: grab;
+  /* 觸控時由 SortableJS 處理拖曳，不觸發頁面捲動 */
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.drag-handle:hover {
+  color: #aaa;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
 }
 
 .song-checkbox {
@@ -317,6 +373,12 @@ function handleContextDelete() {
 
 .context-menu-item:hover {
   background: #3a3a3a;
+}
+
+.context-menu-divider {
+  height: 1px;
+  margin: 0.25rem 0;
+  background: #444;
 }
 
 .context-menu-item.danger {
