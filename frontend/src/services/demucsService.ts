@@ -16,6 +16,9 @@ import type {
 } from './demucs/protocol'
 import type { DemucsCore } from './demucs/demucsCore'
 
+/** 分離被取消時的錯誤訊息（與 demucsCore 一致） */
+const CANCELLED_MESSAGE = '處理已取消'
+
 export type { DemucsTracksResult, SeparationProgress }
 
 /**
@@ -94,6 +97,8 @@ interface DemucsBackend {
   readonly kind: 'worker' | 'inline'
   init(options: DemucsInitOptions, onDownloadProgress?: DownloadProgressCallback): Promise<void>
   separateWav(wav: ArrayBuffer, onProgress?: (p: SeparationProgress) => void): Promise<DemucsTracksResult>
+  /** 取消進行中的分離（於下一個區段完成時中止） */
+  cancel(): void
   dispose(): void
 }
 
@@ -102,6 +107,12 @@ interface DemucsBackend {
  * 遇到此錯誤時改用主執行緒備援
  */
 class WorkerStartupError extends Error {}
+
+/**
+ * Worker 執行中崩潰（例如記憶體不足）
+ * 只有這種錯誤需要重建 Worker；一般的分離錯誤不影響 Worker 與已載入的模型
+ */
+class WorkerCrashError extends Error {}
 
 interface PendingRequest {
   resolve: (result: DemucsTracksResult | undefined) => void
@@ -123,6 +134,8 @@ function createWorkerBackend(): DemucsBackend {
   // 收過任何訊息代表 Worker 腳本已成功載入
   let started = false
   let disposed = false
+  // 進行中的分離請求 id（用於取消）
+  let activeSeparateId: number | null = null
 
   const failAll = (error: Error) => {
     pending.forEach(p => p.reject(error))
@@ -162,11 +175,11 @@ function createWorkerBackend(): DemucsBackend {
   worker.onerror = (event: ErrorEvent) => {
     event.preventDefault()
     const message = event.message || 'Worker 發生未預期的錯誤'
-    failAll(started ? new Error(message) : new WorkerStartupError(message))
+    failAll(started ? new WorkerCrashError(message) : new WorkerStartupError(message))
   }
 
   worker.onmessageerror = () => {
-    failAll(new Error('Worker 訊息解析失敗'))
+    failAll(new WorkerCrashError('Worker 訊息解析失敗'))
   }
 
   const send = (
@@ -191,10 +204,22 @@ function createWorkerBackend(): DemucsBackend {
     },
 
     async separateWav(wav, onProgress) {
-      // transfer：WAV 資料移交給 Worker，主執行緒不再保留一份
-      const result = await send({ type: 'separate', id: nextId++, wav }, { onProgress }, [wav])
-      if (!result) throw new Error('Worker 未回傳分離結果')
-      return result
+      const id = nextId++
+      activeSeparateId = id
+      try {
+        // transfer：WAV 資料移交給 Worker，主執行緒不再保留一份
+        const result = await send({ type: 'separate', id, wav }, { onProgress }, [wav])
+        if (!result) throw new Error('Worker 未回傳分離結果')
+        return result
+      } finally {
+        if (activeSeparateId === id) activeSeparateId = null
+      }
+    },
+
+    cancel() {
+      if (activeSeparateId !== null && !disposed) {
+        worker.postMessage({ type: 'cancel', id: activeSeparateId } satisfies DemucsRequest)
+      }
     },
 
     dispose() {
@@ -211,6 +236,7 @@ function createWorkerBackend(): DemucsBackend {
 async function createInlineBackend(): Promise<DemucsBackend> {
   const { createDemucsCore } = await import('./demucs/demucsCore')
   let downloadCallback: DownloadProgressCallback | undefined
+  let cancelRequested = false
   const core: DemucsCore = createDemucsCore({
     onDownloadProgress: (loaded, total) => downloadCallback?.(loaded, total),
     onLog: (phase, msg) => console.log(`[Demucs ${phase}] ${msg}`),
@@ -226,7 +252,17 @@ async function createInlineBackend(): Promise<DemucsBackend> {
         downloadCallback = undefined
       }
     },
-    separateWav: (wav, onProgress) => core.separateWav(wav, onProgress),
+    async separateWav(wav, onProgress) {
+      cancelRequested = false
+      try {
+        return await core.separateWav(wav, onProgress, () => cancelRequested)
+      } finally {
+        cancelRequested = false
+      }
+    },
+    cancel() {
+      cancelRequested = true
+    },
     dispose() {
       // 主執行緒模式無需額外釋放
     },
@@ -241,6 +277,8 @@ class DemucsService {
   private modelLoaded = false
   private loadingPromise: Promise<void> | null = null
   private workerUnavailable = false
+  // 同一個 ONNX session 不能同時推論，分離請求依序執行
+  private separateQueue: Promise<unknown> = Promise.resolve()
 
   /**
    * 初始化並載入模型（延遲載入）
@@ -323,19 +361,36 @@ class DemucsService {
     wav: ArrayBuffer,
     onProgress?: (info: SeparationProgress) => void
   ): Promise<DemucsTracksResult> {
-    if (!this.backend || !this.modelLoaded) {
-      throw new Error('模型尚未載入，請先呼叫 initialize()')
-    }
-
-    try {
-      return await this.backend.separateWav(wav, onProgress)
-    } catch (error) {
-      // Worker 崩潰（例如記憶體不足）時重置，下次重新建立
-      if (this.backend.kind === 'worker') {
-        this.dispose()
+    const job = this.separateQueue.then(async () => {
+      const backend = this.backend
+      if (!backend || !this.modelLoaded) {
+        throw new Error('模型尚未載入，請先呼叫 initialize()')
       }
-      throw new Error(`音源分離失敗: ${error instanceof Error ? error.message : '未知錯誤'}`)
-    }
+
+      try {
+        return await backend.separateWav(wav, onProgress)
+      } catch (error) {
+        // 只有 Worker 崩潰（例如記憶體不足）才重置，下次重新建立；
+        // 一般錯誤或取消不影響 Worker 與已載入的模型
+        if (error instanceof WorkerCrashError && this.backend === backend) {
+          this.dispose()
+        }
+        const message = error instanceof Error ? error.message : '未知錯誤'
+        if (message === CANCELLED_MESSAGE) {
+          throw new Error(CANCELLED_MESSAGE)
+        }
+        throw new Error(`音源分離失敗: ${message}`)
+      }
+    })
+    this.separateQueue = job.catch(() => undefined)
+    return job
+  }
+
+  /**
+   * 取消進行中的分離（於目前區段完成時中止，模型保留，不需重新下載）
+   */
+  cancel(): void {
+    this.backend?.cancel()
   }
 
   /**

@@ -32,6 +32,8 @@ export interface DemucsTracksResult {
 export type DemucsRequest =
   | { type: 'init'; id: number; options: DemucsInitOptions }
   | { type: 'separate'; id: number; wav: ArrayBuffer }
+  /** 取消進行中的分離（於下一個區段完成時中止，模型保留） */
+  | { type: 'cancel'; id: number }
 
 /** Worker → 主執行緒 */
 export type DemucsResponse =

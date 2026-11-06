@@ -183,7 +183,11 @@ const allCompletedJobs = computed(() => {
 })
 
 // 取得本地處理狀態
-const { state: localProcessorState, currentTitle: localProcessorTitle } = useLocalProcessor()
+const {
+  state: localProcessorState,
+  currentTitle: localProcessorTitle,
+  queuedTasks: localQueuedTasks,
+} = useLocalProcessor()
 
 // 將本地處理任務轉換為 ProcessingJob 格式
 const localProcessingJob = computed<ProcessingJob | null>(() => {
@@ -211,9 +215,19 @@ const localProcessingJob = computed<ProcessingJob | null>(() => {
 // 合併本地和遠端的 processing jobs
 const allProcessingJobs = computed<readonly ProcessingJob[]>(() => {
   const jobs: ProcessingJob[] = [...processingJobs.value]
+  // 佇列中等待的本地任務
+  const queued: ProcessingJob[] = localQueuedTasks.value.map(task => ({
+    id: task.id,
+    source_title: task.title,
+    source_type: task.sourceType,
+    status: 'pending' as const,
+    progress: 0,
+    current_stage: '排隊等待中',
+  }))
+  jobs.unshift(...queued)
   const localJob = localProcessingJob.value
   if (localJob) {
-    jobs.unshift(localJob) // 本地任務放在最前面
+    jobs.unshift(localJob) // 處理中的本地任務放在最前面
   }
   return jobs
 })
