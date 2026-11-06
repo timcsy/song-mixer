@@ -69,8 +69,9 @@ watch(() => props.selectedJob, async (newJob) => {
   try {
     const backend = getBackendCapabilities()
 
-    // 優先從 IndexedDB 載入（純前端模式）
-    const localSong = await storageService.getSong(newJob.id)
+    // 優先從 IndexedDB 載入 metadata（純前端模式）
+    // 音訊資料由 ResultView / AudioMixer 需要時才載入，避免同一首歌在記憶體中有多份
+    const localSong = await storageService.getSongMeta(newJob.id)
     if (localSong) {
       // 將 IndexedDB 的 SongRecord 轉換為 JobWithResult 格式
       jobDetail.value = {
@@ -89,16 +90,14 @@ watch(() => props.selectedJob, async (newJob) => {
         },
         // 額外資訊給 ResultView 使用
         source_title: localSong.title,
-        track_paths: localSong.tracks ? {
+        track_paths: {
           drums: 'indexeddb',
           bass: 'indexeddb',
           other: 'indexeddb',
           vocals: 'indexeddb',
-        } : null,
+        },
         sample_rate: 44100,
-        // 標記這是本地歌曲
-        _localSong: localSong,
-      } as JobWithResult & { _localSong: typeof localSong }
+      } as JobWithResult
     } else if (backend.available) {
       // 後端模式：從 API 載入
       jobDetail.value = await api.getJob(newJob.id)

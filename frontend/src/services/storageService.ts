@@ -1,13 +1,76 @@
 /**
  * IndexedDB 儲存服務
  * Feature: 005-frontend-processing
+ *
+ * 資料結構（v2）：
+ * - songs store：歌曲 metadata（SongMeta），體積小，可一次全部讀取
+ * - songData store：音軌與影片（SongData），體積大，只在需要時依 id 讀取
+ *
+ * v1 時 metadata 與音訊資料存在同一筆記錄中，列出歌曲時會把所有音訊
+ * 一併載入記憶體，歌曲一多就會耗盡記憶體，因此 v2 拆成兩個 store。
  */
 
-import type { SongRecord } from '@/types/storage'
+import type { SongRecord, SongMeta, SongData } from '@/types/storage'
 
 const DB_NAME = 'sing-local-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const SONGS_STORE = 'songs'
+const SONG_DATA_STORE = 'songData'
+
+/**
+ * 將完整歌曲記錄拆成 metadata 與音訊資料
+ */
+function splitSongRecord(song: SongRecord): { meta: SongMeta; data: SongData } {
+  const { tracks, originalVideo, ...rest } = song
+  return {
+    meta: { ...rest, hasVideo: !!originalVideo },
+    data: { id: song.id, tracks, originalVideo },
+  }
+}
+
+/**
+ * 將 IDBRequest 包裝成 Promise
+ */
+function promisifyRequest<T>(request: IDBRequest<T>, errorMessage: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(new Error(`${errorMessage}: ${request.error?.message}`))
+  })
+}
+
+/**
+ * 等待 transaction 完成
+ */
+function waitForTransaction(transaction: IDBTransaction, errorMessage: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(new Error(`${errorMessage}: ${transaction.error?.message}`))
+    transaction.onabort = () => reject(new Error(`${errorMessage}: ${transaction.error?.message ?? '交易中止'}`))
+  })
+}
+
+/**
+ * v1 → v2 遷移：把 songs store 內的音訊資料搬到 songData store
+ * 使用 cursor 逐筆處理，同一時間只有一首歌的資料在記憶體中
+ */
+function migrateV1ToV2(transaction: IDBTransaction): void {
+  const songsStore = transaction.objectStore(SONGS_STORE)
+  const dataStore = transaction.objectStore(SONG_DATA_STORE)
+  const cursorRequest = songsStore.openCursor()
+
+  cursorRequest.onsuccess = () => {
+    const cursor = cursorRequest.result
+    if (!cursor) return
+
+    const record = cursor.value as SongRecord & { hasVideo?: boolean }
+    if (record.tracks) {
+      const { meta, data } = splitSongRecord(record)
+      dataStore.put(data)
+      cursor.update(meta)
+    }
+    cursor.continue()
+  }
+}
 
 /**
  * IndexedDB 儲存服務
@@ -25,28 +88,54 @@ class StorageService {
       return this.initPromise
     }
 
-    this.initPromise = new Promise((resolve, reject) => {
+    this.initPromise = new Promise<void>((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION)
 
       request.onerror = () => {
         reject(new Error(`無法開啟 IndexedDB: ${request.error?.message}`))
       }
 
+      request.onblocked = () => {
+        console.warn('IndexedDB 升級被其他分頁阻擋，請關閉其他開啟此應用的分頁')
+      }
+
       request.onsuccess = () => {
         this.db = request.result
+        // 其他分頁要升級資料庫時，主動關閉連線避免阻擋
+        this.db.onversionchange = () => {
+          this.db?.close()
+          this.db = null
+          this.initPromise = null
+        }
         resolve()
       }
 
       request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result
+        const db = request.result
+        const transaction = request.transaction!
+        const oldVersion = event.oldVersion
 
-        // 建立 songs store
+        // 建立 songs store（metadata）
         if (!db.objectStoreNames.contains(SONGS_STORE)) {
           const store = db.createObjectStore(SONGS_STORE, { keyPath: 'id' })
           store.createIndex('createdAt', 'createdAt', { unique: false })
           store.createIndex('title', 'title', { unique: false })
         }
+
+        // 建立 songData store（音訊資料）
+        if (!db.objectStoreNames.contains(SONG_DATA_STORE)) {
+          db.createObjectStore(SONG_DATA_STORE, { keyPath: 'id' })
+        }
+
+        // v1 → v2：拆分既有資料
+        if (oldVersion >= 1 && oldVersion < 2) {
+          migrateV1ToV2(transaction)
+        }
       }
+    }).catch((err) => {
+      // 失敗時允許重試
+      this.initPromise = null
+      throw err
     })
 
     return this.initPromise
@@ -66,67 +155,79 @@ class StorageService {
   }
 
   /**
-   * 儲存歌曲記錄
+   * 儲存歌曲記錄（metadata 與音訊資料在同一個 transaction 寫入）
    */
   async saveSong(song: SongRecord): Promise<void> {
     const db = await this.ensureInit()
+    const { meta, data } = splitSongRecord(song)
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([SONGS_STORE], 'readwrite')
-      const store = transaction.objectStore(SONGS_STORE)
-      const request = store.put(song)
-
-      request.onerror = () => {
-        reject(new Error(`儲存歌曲失敗: ${request.error?.message}`))
-      }
-
-      request.onsuccess = () => {
-        resolve()
-      }
-    })
+    const transaction = db.transaction([SONGS_STORE, SONG_DATA_STORE], 'readwrite')
+    transaction.objectStore(SONG_DATA_STORE).put(data)
+    transaction.objectStore(SONGS_STORE).put(meta)
+    await waitForTransaction(transaction, '儲存歌曲失敗')
   }
 
   /**
-   * 取得單首歌曲
+   * 取得單首歌曲的 metadata（不含音訊資料）
+   */
+  async getSongMeta(id: string): Promise<SongMeta | null> {
+    const db = await this.ensureInit()
+    const store = db.transaction([SONGS_STORE], 'readonly').objectStore(SONGS_STORE)
+    const result = await promisifyRequest<SongMeta | undefined>(store.get(id), '取得歌曲失敗')
+    return result || null
+  }
+
+  /**
+   * 取得單首歌曲的完整資料（含音軌與影片）
+   * 注意：資料量很大，只在播放、匯出時使用，用完不要長期保留引用
    */
   async getSong(id: string): Promise<SongRecord | null> {
     const db = await this.ensureInit()
+    const transaction = db.transaction([SONGS_STORE, SONG_DATA_STORE], 'readonly')
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([SONGS_STORE], 'readonly')
-      const store = transaction.objectStore(SONGS_STORE)
-      const request = store.get(id)
+    const [meta, data] = await Promise.all([
+      promisifyRequest<SongMeta | undefined>(
+        transaction.objectStore(SONGS_STORE).get(id),
+        '取得歌曲失敗'
+      ),
+      promisifyRequest<SongData | undefined>(
+        transaction.objectStore(SONG_DATA_STORE).get(id),
+        '取得歌曲資料失敗'
+      ),
+    ])
 
-      request.onerror = () => {
-        reject(new Error(`取得歌曲失敗: ${request.error?.message}`))
-      }
+    if (!meta || !data) {
+      return null
+    }
 
-      request.onsuccess = () => {
-        resolve(request.result || null)
-      }
-    })
+    const { hasVideo: _hasVideo, ...rest } = meta
+    return {
+      ...rest,
+      tracks: data.tracks,
+      originalVideo: data.originalVideo,
+    }
   }
 
   /**
-   * 取得所有歌曲（依建立時間排序，最新在前）
+   * 取得所有歌曲的 metadata（依建立時間排序，最新在前）
+   * 不含音訊資料，歌曲數量多時也不會佔用大量記憶體
    */
-  async getAllSongs(): Promise<SongRecord[]> {
+  async getAllSongMetas(): Promise<SongMeta[]> {
     const db = await this.ensureInit()
 
     return new Promise((resolve, reject) => {
       const transaction = db.transaction([SONGS_STORE], 'readonly')
-      const store = transaction.objectStore(SONGS_STORE)
-      const index = store.index('createdAt')
+      const index = transaction.objectStore(SONGS_STORE).index('createdAt')
       const request = index.openCursor(null, 'prev') // 降序排列
 
-      const songs: SongRecord[] = []
+      const songs: SongMeta[] = []
 
       request.onerror = () => {
         reject(new Error(`取得歌曲列表失敗: ${request.error?.message}`))
       }
 
-      request.onsuccess = (event) => {
-        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result
+      request.onsuccess = () => {
+        const cursor = request.result
         if (cursor) {
           songs.push(cursor.value)
           cursor.continue()
@@ -138,37 +239,31 @@ class StorageService {
   }
 
   /**
-   * 刪除歌曲
+   * 刪除歌曲（metadata 與音訊資料）
    */
   async deleteSong(id: string): Promise<void> {
     const db = await this.ensureInit()
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([SONGS_STORE], 'readwrite')
-      const store = transaction.objectStore(SONGS_STORE)
-      const request = store.delete(id)
-
-      request.onerror = () => {
-        reject(new Error(`刪除歌曲失敗: ${request.error?.message}`))
-      }
-
-      request.onsuccess = () => {
-        resolve()
-      }
-    })
+    const transaction = db.transaction([SONGS_STORE, SONG_DATA_STORE], 'readwrite')
+    transaction.objectStore(SONGS_STORE).delete(id)
+    transaction.objectStore(SONG_DATA_STORE).delete(id)
+    await waitForTransaction(transaction, '刪除歌曲失敗')
   }
 
   /**
-   * 重新命名歌曲
+   * 重新命名歌曲（只更新 metadata，不讀取音訊資料）
    */
   async renameSong(id: string, newTitle: string): Promise<void> {
-    const song = await this.getSong(id)
-    if (!song) {
+    const db = await this.ensureInit()
+    const transaction = db.transaction([SONGS_STORE], 'readwrite')
+    const store = transaction.objectStore(SONGS_STORE)
+
+    const meta = await promisifyRequest<SongMeta | undefined>(store.get(id), '取得歌曲失敗')
+    if (!meta) {
       throw new Error('歌曲不存在')
     }
 
-    song.title = newTitle
-    await this.saveSong(song)
+    store.put({ ...meta, title: newTitle })
+    await waitForTransaction(transaction, '重新命名歌曲失敗')
   }
 
   /**
@@ -195,23 +290,13 @@ class StorageService {
    */
   async clearAll(): Promise<void> {
     const db = await this.ensureInit()
-
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([SONGS_STORE], 'readwrite')
-      const store = transaction.objectStore(SONGS_STORE)
-      const request = store.clear()
-
-      request.onerror = () => {
-        reject(new Error(`清除資料失敗: ${request.error?.message}`))
-      }
-
-      request.onsuccess = () => {
-        resolve()
-      }
-    })
+    const transaction = db.transaction([SONGS_STORE, SONG_DATA_STORE], 'readwrite')
+    transaction.objectStore(SONGS_STORE).clear()
+    transaction.objectStore(SONG_DATA_STORE).clear()
+    await waitForTransaction(transaction, '清除資料失敗')
   }
 }
 
 export const storageService = new StorageService()
-export type { SongRecord }
+export type { SongRecord, SongMeta }
 export default storageService

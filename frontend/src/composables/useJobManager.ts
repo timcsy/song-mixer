@@ -4,30 +4,27 @@
  * 管理已完成歌曲列表、處理中任務列表、選中狀態、抽屜狀態等
  * 所有歌曲資料儲存於 IndexedDB（純前端模式）
  */
-import { ref, computed, readonly, onMounted, onUnmounted } from 'vue'
+import { ref, shallowRef, computed, readonly } from 'vue'
 import { type CompletedJob, type ProcessingJob } from '@/services/api'
-import { storageService, type SongRecord } from '@/services/storageService'
+import { storageService, type SongMeta } from '@/services/storageService'
 import { useLocalProcessor } from '@/composables/useLocalProcessor'
 
 // 全域狀態（單例模式）
 const completedJobs = ref<CompletedJob[]>([])
 const processingJobs = ref<ProcessingJob[]>([])
-const localSongs = ref<SongRecord[]>([]) // IndexedDB 本地歌曲
+// IndexedDB 本地歌曲 metadata（不含音訊資料，避免歌曲多時耗盡記憶體）
+const localSongs = shallowRef<SongMeta[]>([])
 const selectedJobId = ref<string | null>(null)
-const selectedSong = ref<SongRecord | null>(null) // 完整的歌曲資料
+const selectedSong = shallowRef<SongMeta | null>(null) // 選中歌曲的 metadata
 const drawerOpen = ref(window.innerWidth >= 768) // 桌面版預設開啟
 const selectedJobIds = ref<Set<string>>(new Set()) // 勾選的歌曲（用於匯出）
-const isPolling = ref(false)
 const error = ref<string | null>(null)
-
-let pollIntervalId: number | null = null
-const POLL_INTERVAL = 2000 // 2 秒
 
 // 從 IndexedDB 載入本地歌曲
 async function fetchLocalSongs() {
   try {
     await storageService.init()
-    localSongs.value = await storageService.getAllSongs()
+    localSongs.value = await storageService.getAllSongMetas()
   } catch (err) {
     console.error('Failed to fetch local songs:', err)
   }
@@ -50,19 +47,14 @@ async function fetchJobs() {
   }
 }
 
-function startPolling() {
-  if (isPolling.value) return
-  isPolling.value = true
-  fetchJobs() // 立即執行一次
-  pollIntervalId = window.setInterval(fetchJobs, POLL_INTERVAL)
-}
-
-function stopPolling() {
-  if (pollIntervalId !== null) {
-    clearInterval(pollIntervalId)
-    pollIntervalId = null
-  }
-  isPolling.value = false
+// 註：不再定時輪詢。歌曲列表只在新增、匯入、改名、刪除後由呼叫端 refreshJobs() 更新
+// 分頁回到前景時刷新一次（可能在其他分頁新增了歌曲；只讀 metadata，成本很低）
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      fetchJobs()
+    }
+  })
 }
 
 // 選取歌曲
@@ -77,9 +69,9 @@ async function selectJob(jobId: string | null) {
       return
     }
 
-    // 嘗試從 IndexedDB 載入
+    // 嘗試從 IndexedDB 載入 metadata（完整音訊由播放器自行載入）
     try {
-      const song = await storageService.getSong(jobId)
+      const song = await storageService.getSongMeta(jobId)
       if (song) {
         selectedSong.value = song
         return
@@ -129,13 +121,17 @@ async function deleteJob(jobId: string): Promise<boolean> {
     // 從 IndexedDB 刪除
     await storageService.deleteSong(jobId)
     localSongs.value = localSongs.value.filter(s => s.id !== jobId)
+    if (selectedJobIds.value.has(jobId)) {
+      const newSet = new Set(selectedJobIds.value)
+      newSet.delete(jobId)
+      selectedJobIds.value = newSet
+    }
 
     // 取消選取
     if (selectedJobId.value === jobId) {
       selectedJobId.value = null
       selectedSong.value = null
     }
-    selectedJobIds.value.delete(jobId)
     return true
   } catch (err) {
     console.error('Failed to delete job:', err)
@@ -237,31 +233,15 @@ async function getStorageUsage() {
 }
 
 export function useJobManager() {
-  // 生命週期管理
-  onMounted(() => {
-    startPolling()
-    // 響應式斷點監聽
-    const handleResize = () => {
-      // 只在視窗寬度變化跨越斷點時調整
-      // 不強制覆蓋使用者手動設定的狀態
-    }
-    window.addEventListener('resize', handleResize)
-  })
-
-  onUnmounted(() => {
-    stopPolling()
-  })
-
   return {
     // 狀態（唯讀）
     completedJobs: allCompletedJobs, // 使用合併後的列表
     localSongs: readonly(localSongs),
     processingJobs: allProcessingJobs, // 使用合併後的列表（包含本地處理任務）
     selectedJobId: readonly(selectedJobId),
-    selectedSong: readonly(selectedSong), // 完整歌曲資料
+    selectedSong: readonly(selectedSong), // 選中歌曲的 metadata
     drawerOpen: readonly(drawerOpen),
     selectedJobIds: readonly(selectedJobIds),
-    isPolling: readonly(isPolling),
     error: readonly(error),
 
     // 計算屬性
@@ -280,7 +260,5 @@ export function useJobManager() {
     deleteJob,
     refreshJobs,
     getStorageUsage,
-    startPolling,
-    stopPolling,
   }
 }

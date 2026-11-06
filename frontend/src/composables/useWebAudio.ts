@@ -1,8 +1,8 @@
-import { ref, reactive, computed, onUnmounted, type Ref } from 'vue';
+import { ref, shallowRef, reactive, computed, onUnmounted, type Ref } from 'vue';
 import * as Tone from 'tone';
 import { DEFAULT_VOLUMES, type TrackName, type TrackState } from '@/types/audio';
 import type { SongRecord } from '@/types/storage';
-import { int16BufferToStereoFloat32 } from '@/utils/format';
+import { decodeInt16StereoInto } from '@/utils/format';
 import { storageService } from '@/services/storageService';
 
 export interface UseWebAudioOptions {
@@ -164,7 +164,11 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
   });
 
   // 本地歌曲資料（從 IndexedDB 載入）
-  let localSongRecord = ref<SongRecord | null>(songRecord ?? null);
+  // 只在載入音軌期間持有，轉成 AudioBuffer 後即釋放以節省記憶體
+  const localSongRecord = shallowRef<SongRecord | null>(songRecord ?? null);
+  // 記住歌曲 id 與標題，釋放資料後若需重新載入可從 IndexedDB 讀取
+  const localSongId: string | null = songRecord?.id ?? null;
+  let localSongTitle: string | null = songRecord?.title ?? null;
 
   // Update current time during playback
   const updateTime = () => {
@@ -319,18 +323,13 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
     buffer: ArrayBuffer,
     sampleRate: number
   ): Promise<AudioBuffer> => {
-    // 從 Int16 格式還原為 Float32
-    const { left: leftData, right: rightData } = int16BufferToStereoFloat32(buffer);
-
     const audioCtx = Tone.getContext().rawContext as AudioContext;
-    const audioBuffer = audioCtx.createBuffer(2, leftData.length, sampleRate);
+    // Int16 立體聲交錯：每個 frame 4 bytes
+    const frameCount = Math.floor(buffer.byteLength / 4);
+    const audioBuffer = audioCtx.createBuffer(2, Math.max(frameCount, 1), sampleRate);
 
-    const left = audioBuffer.getChannelData(0);
-    const right = audioBuffer.getChannelData(1);
-
-    // 複製資料到 AudioBuffer
-    left.set(leftData);
-    right.set(rightData);
+    // 直接從 Int16 解碼寫入 AudioBuffer，不配置中間陣列
+    decodeInt16StereoInto(buffer, audioBuffer.getChannelData(0), audioBuffer.getChannelData(1));
 
     return audioBuffer;
   };
@@ -383,14 +382,16 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
    * 從 IndexedDB 載入歌曲資料（透過 jobId）
    */
   const loadSongFromIndexedDB = async (): Promise<void> => {
-    if (!jobId) return;
+    const id = jobId ?? localSongId;
+    if (!id) return;
 
     await storageService.init();
-    const song = await storageService.getSong(jobId);
+    const song = await storageService.getSong(id);
     if (!song) {
       throw new Error('找不到歌曲資料');
     }
     localSongRecord.value = song;
+    localSongTitle = song.title;
   };
 
   // Load all tracks
@@ -420,7 +421,7 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
       // 設定 Media Session API（幫助瀏覽器識別這是媒體播放器）
       if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = new MediaMetadata({
-          title: localSongRecord.value?.title || '音樂混音器',
+          title: localSongTitle || localSongRecord.value?.title || '音樂混音器',
           artist: 'Song Mixer',
           album: 'Local Library',
         });
@@ -449,12 +450,17 @@ export function useWebAudio(options: UseWebAudioOptions): UseWebAudioReturn {
 
       // 根據來源載入音軌
       // 優先使用已提供的 songRecord，否則從 IndexedDB 載入
-      if (!localSongRecord.value && jobId) {
+      if (!localSongRecord.value && (jobId || localSongId)) {
         await loadSongFromIndexedDB();
       }
 
       if (localSongRecord.value) {
-        await loadTracksFromSongRecord();
+        try {
+          await loadTracksFromSongRecord();
+        } finally {
+          // 音軌已複製進 AudioBuffer，釋放原始 Int16 資料
+          localSongRecord.value = null;
+        }
       } else {
         throw new Error('必須提供 jobId 或 songRecord');
       }

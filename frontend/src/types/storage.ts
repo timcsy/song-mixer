@@ -37,6 +37,25 @@ export interface SongRecord {
 }
 
 /**
+ * 歌曲 metadata（不含音訊資料），用於歌曲列表
+ * 儲存於 IndexedDB 的 songs store，音訊資料另存於 songData store
+ */
+export type SongMeta = Omit<SongRecord, 'tracks' | 'originalVideo'> & {
+  /** 是否有原始影片 */
+  hasVideo?: boolean
+}
+
+/**
+ * 歌曲音訊資料，儲存於 IndexedDB 的 songData store
+ */
+export interface SongData {
+  /** 對應 SongMeta.id */
+  id: string
+  tracks: SongRecord['tracks']
+  originalVideo?: ArrayBuffer
+}
+
+/**
  * 處理子階段
  */
 export type ProcessingSubStage =
