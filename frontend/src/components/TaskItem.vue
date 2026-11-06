@@ -1,24 +1,29 @@
 <template>
-  <div class="task-item" @click="$emit('click', job.id)">
-    <div class="task-info">
+  <div
+    class="task-item"
+    :class="{ pending: job.status === 'pending' }"
+    :title="job.source_title || undefined"
+    @click="$emit('click', job.id)"
+  >
+    <div class="task-row">
       <span class="task-title">{{ job.source_title || '處理中...' }}</span>
-      <span class="task-status">{{ statusText }}</span>
+      <button
+        class="cancel-btn"
+        @click.stop="$emit('cancel', job.id)"
+        title="取消處理"
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      </button>
     </div>
-    <div class="task-progress">
-      <div class="progress-bar">
-        <div class="progress-fill" :style="{ width: `${displayProgress}%` }"></div>
-      </div>
+    <div class="task-row">
+      <span class="task-status">{{ statusText }}</span>
       <span class="progress-text">{{ displayProgress }}%</span>
     </div>
-    <button
-      class="cancel-btn"
-      @click.stop="$emit('cancel', job.id)"
-      title="取消處理"
-    >
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M18 6L6 18M6 6l12 12" />
-      </svg>
-    </button>
+    <div class="progress-bar">
+      <div class="progress-fill" :style="{ width: `${displayProgress}%` }"></div>
+    </div>
   </div>
 </template>
 
@@ -68,36 +73,54 @@ const statusText = computed(() => {
 </script>
 
 <style scoped>
+/* 固定寬度、文字不換行：任務再多也只橫向捲動，佇列高度不變 */
 .task-item {
+  flex: 0 0 220px;
+  width: 220px;
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.75rem;
   background: #252525;
   border-radius: 4px;
   cursor: pointer;
-  transition: background-color 0.15s;
-  min-width: 200px;
+  transition: background-color 0.15s, opacity 0.15s;
+  box-sizing: border-box;
 }
 
 .task-item:hover {
   background: #2a2a2a;
 }
 
-.task-info {
+/* 排隊中的任務淡化，與處理中的任務區分 */
+.task-item.pending {
+  opacity: 0.6;
+}
+
+.task-item.pending:hover {
+  opacity: 1;
+}
+
+.task-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
   min-width: 0;
+}
+
+.task-title,
+.task-status {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .task-title {
   font-size: 0.85rem;
   color: #e0e0e0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 150px;
 }
 
 .task-status {
@@ -105,15 +128,16 @@ const statusText = computed(() => {
   color: #888;
 }
 
-.task-progress {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.progress-text {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  color: #888;
+  font-family: monospace;
 }
 
 .progress-bar {
-  width: 60px;
-  height: 4px;
+  height: 3px;
+  margin-top: 0.15rem;
   background: #333;
   border-radius: 2px;
   overflow: hidden;
@@ -125,19 +149,13 @@ const statusText = computed(() => {
   transition: width 0.3s;
 }
 
-.progress-text {
-  font-size: 0.7rem;
-  color: #888;
-  font-family: monospace;
-  min-width: 32px;
-}
-
 .cancel-btn {
   background: transparent;
   border: none;
   color: #666;
   cursor: pointer;
-  padding: 0.25rem;
+  padding: 0.15rem;
+  margin: -0.15rem -0.25rem -0.15rem 0;
   border-radius: 4px;
   display: flex;
   align-items: center;
