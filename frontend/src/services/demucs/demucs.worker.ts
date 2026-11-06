@@ -17,6 +17,8 @@ const scope = self as unknown as WorkerScope
 
 // 目前正在初始化的請求 id（用於回報下載進度）
 let initRequestId = 0
+// 已要求取消的分離請求 id
+const cancelledIds = new Set<number>()
 
 const core = createDemucsCore({
   onDownloadProgress: (loaded, total) => {
@@ -30,6 +32,12 @@ const core = createDemucsCore({
 scope.onmessage = async (event) => {
   const request = event.data
 
+  // 取消訊息：分離迴圈在每個區段的 await 之間會讓出事件迴圈，因此能即時收到
+  if (request.type === 'cancel') {
+    cancelledIds.add(request.id)
+    return
+  }
+
   try {
     switch (request.type) {
       case 'init': {
@@ -40,9 +48,13 @@ scope.onmessage = async (event) => {
       }
 
       case 'separate': {
-        const result = await core.separateWav(request.wav, (info) => {
-          scope.postMessage({ type: 'progress', id: request.id, info })
-        })
+        const result = await core.separateWav(
+          request.wav,
+          (info) => {
+            scope.postMessage({ type: 'progress', id: request.id, info })
+          },
+          () => cancelledIds.has(request.id)
+        ).finally(() => cancelledIds.delete(request.id))
         // 以 transfer 回傳，不複製大型音軌資料
         const { drums, bass, other, vocals } = result.tracks
         scope.postMessage(

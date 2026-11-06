@@ -483,7 +483,10 @@ function handleTaskCancel(jobId: string) {
     if (confirm('確定要取消目前的處理任務嗎？')) {
       cancelLocalProcessing();
     }
+    return;
   }
+  // 佇列中等待的本地任務
+  cancelLocalProcessing(jobId);
   // TODO: 後端任務取消（如果需要）
 }
 

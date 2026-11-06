@@ -32,8 +32,41 @@ const state = ref<ProcessingState>({
 // 當前處理中的任務標題（用於顯示在 TaskQueue）
 const currentTitle = ref<string | null>(null)
 
-// 取消標記
+// 取消標記（目前處理中的任務）
 let cancelled = false
+
+/**
+ * 排隊等待中的任務
+ * FFmpeg 與 Demucs 都只能一次處理一首，且處理狀態是全域共用的，
+ * 因此任務一律依序執行，後加入的任務在佇列中等待。
+ */
+export interface QueuedTask {
+  id: string
+  title: string
+  sourceType: 'youtube' | 'upload'
+}
+const queuedTasks = ref<QueuedTask[]>([])
+const cancelledQueuedIds = new Set<string>()
+let queueTail: Promise<unknown> = Promise.resolve()
+
+/**
+ * 將任務加入佇列，前一個任務結束（成功或失敗）後才開始
+ */
+function enqueue<T>(title: string, sourceType: QueuedTask['sourceType'], run: () => Promise<T>): Promise<T> {
+  const id = uuidv4()
+  queuedTasks.value = [...queuedTasks.value, { id, title, sourceType }]
+
+  const job = queueTail.then(() => {
+    queuedTasks.value = queuedTasks.value.filter(t => t.id !== id)
+    if (cancelledQueuedIds.delete(id)) {
+      throw new Error('處理已取消')
+    }
+    return run()
+  })
+  // 任一任務失敗不影響後續任務
+  queueTail = job.catch(() => undefined)
+  return job
+}
 
 /**
  * 確保進度值有效
@@ -111,7 +144,7 @@ function isAudioFile(file: File): boolean {
  * @param options 處理選項
  * @returns 新建立的 SongRecord.id
  */
-async function processUpload(
+async function runUpload(
   file: File,
   title: string,
   options?: ProcessOptions
@@ -353,7 +386,7 @@ async function processUpload(
  * @param options 處理選項
  * @returns 新建立的 SongRecord.id
  */
-async function processYouTube(
+async function runYouTube(
   url: string,
   options?: ProcessOptions
 ): Promise<string> {
@@ -586,9 +619,38 @@ async function processYouTube(
 /**
  * 取消當前處理
  */
-function cancel() {
-  cancelled = true
+/**
+ * 取消任務
+ * @param taskId 佇列中任務的 id；省略時取消目前處理中的任務
+ */
+function cancel(taskId?: string) {
+  if (taskId && queuedTasks.value.some(t => t.id === taskId)) {
+    cancelledQueuedIds.add(taskId)
+    queuedTasks.value = queuedTasks.value.filter(t => t.id !== taskId)
+    return
+  }
+
+  // 先重設狀態再設定取消旗標（resetState 會清除旗標）
   resetState()
+  cancelled = true
+  // 分離可能長達數分鐘，主動中止，讓佇列中的下一個任務盡快開始
+  demucsService.cancel()
+}
+
+/**
+ * 處理本地上傳的影片或音檔（加入佇列依序處理）
+ * @returns 新建立的 SongRecord.id
+ */
+function processUpload(file: File, title: string, options?: ProcessOptions): Promise<string> {
+  return enqueue(title, 'upload', () => runUpload(file, title, options))
+}
+
+/**
+ * 處理 YouTube 影片（加入佇列依序處理）
+ * @returns 新建立的 SongRecord.id
+ */
+function processYouTube(url: string, options?: ProcessOptions): Promise<string> {
+  return enqueue('YouTube 影片', 'youtube', () => runYouTube(url, options))
 }
 
 /**
@@ -598,6 +660,7 @@ export function useLocalProcessor() {
   return {
     state: readonly(state),
     currentTitle: readonly(currentTitle),
+    queuedTasks: readonly(queuedTasks),
     processUpload,
     processYouTube,
     cancel,

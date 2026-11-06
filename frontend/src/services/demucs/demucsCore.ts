@@ -16,6 +16,9 @@ import type { DemucsInitOptions, DemucsTracksResult, SeparationProgress } from '
 // 使用 jsDelivr CDN（支援 CORS，版本須與 npm 一致）
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/'
 
+/** 分離被取消時拋出的錯誤訊息 */
+export const CANCELLED_MESSAGE = '處理已取消'
+
 export interface DemucsCoreCallbacks {
   onDownloadProgress?: (loaded: number, total: number) => void
   onLog?: (phase: string, msg: string) => void
@@ -27,6 +30,7 @@ export interface DemucsCoreCallbacks {
 export function createDemucsCore(callbacks: DemucsCoreCallbacks = {}) {
   let processor: DemucsProcessor | null = null
   let separationProgress: ((p: SeparationProgress) => void) | null = null
+  let shouldCancel: (() => boolean) | null = null
 
   return {
     /**
@@ -39,6 +43,10 @@ export function createDemucsCore(callbacks: DemucsCoreCallbacks = {}) {
         ort,
         sessionOptions: options.sessionOptions,
         onProgress: (info) => {
+          // 每個區段完成時檢查是否取消；在此拋出會中止 processor.separate
+          if (shouldCancel?.()) {
+            throw new Error(CANCELLED_MESSAGE)
+          }
           if (!separationProgress || !info) return
           const progress = typeof info.progress === 'number' && isFinite(info.progress)
             ? Math.max(0, Math.min(1, info.progress))
@@ -63,18 +71,24 @@ export function createDemucsCore(callbacks: DemucsCoreCallbacks = {}) {
 
     /**
      * 解析 WAV 並分離音軌，回傳 Int16 立體聲交錯格式的四軌資料
+     * 同一個 ONNX session 不能同時執行兩次推論，呼叫端須確保一次只有一個分離
      */
     async separateWav(
       wav: ArrayBuffer,
-      onProgress?: (p: SeparationProgress) => void
+      onProgress?: (p: SeparationProgress) => void,
+      isCancelled?: () => boolean
     ): Promise<DemucsTracksResult> {
       if (!processor) {
         throw new Error('模型尚未載入，請先呼叫 initialize()')
+      }
+      if (separationProgress || shouldCancel) {
+        throw new Error('已有分離正在進行中')
       }
 
       const { left, right, sampleRate, duration } = parseWavToStereo(wav)
 
       separationProgress = onProgress ?? null
+      shouldCancel = isCancelled ?? null
       try {
         const result = await processor.separate(left, right)
         return {
@@ -89,6 +103,7 @@ export function createDemucsCore(callbacks: DemucsCoreCallbacks = {}) {
         }
       } finally {
         separationProgress = null
+        shouldCancel = null
       }
     },
   }
