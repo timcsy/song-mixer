@@ -27,7 +27,12 @@ export default defineConfig({
       strict: false
     }
   },
+  // Worker 使用 ES module 格式（Demucs Worker 與 ffmpeg.wasm 內部 Worker 皆需要）
+  worker: {
+    format: 'es'
+  },
   optimizeDeps: {
-    exclude: ['onnxruntime-web']
+    // ffmpeg.wasm 0.12 以 new URL('./worker.js', import.meta.url) 建立 Worker，不可預先打包
+    exclude: ['onnxruntime-web', '@ffmpeg/ffmpeg', '@ffmpeg/util']
   }
 })

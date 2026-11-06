@@ -2,9 +2,17 @@
  * Type declarations for demucs-web
  */
 declare module 'demucs-web' {
+  interface SeparationProgressInfo {
+    progress: number
+    currentSegment: number
+    totalSegments: number
+  }
+
   interface DemucsOptions {
     ort: typeof import('onnxruntime-web')
-    onProgress?: (progress: number) => void
+    sessionOptions?: Record<string, unknown>
+    onProgress?: (info: SeparationProgressInfo) => void
+    onDownloadProgress?: (loaded: number, total: number) => void
     onLog?: (phase: string, msg: string) => void
   }
 
@@ -22,12 +30,8 @@ declare module 'demucs-web' {
 
   export class DemucsProcessor {
     constructor(options: DemucsOptions)
-    loadModel(url: string): Promise<void>
-    separate(
-      left: Float32Array,
-      right: Float32Array,
-      onProgress?: (progress: number) => void
-    ): Promise<SeparationResult>
+    loadModel(url: string | ArrayBuffer): Promise<unknown>
+    separate(left: Float32Array, right: Float32Array): Promise<SeparationResult>
   }
 
   export const CONSTANTS: {
