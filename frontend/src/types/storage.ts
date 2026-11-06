@@ -34,6 +34,11 @@ export interface SongRecord {
   createdAt: Date
   /** 儲存大小（bytes） */
   storageSize?: number
+  /**
+   * 歌曲列表中的自訂順序（由小到大）
+   * 未設定的歌曲（新加入或舊資料）排在最前面，彼此依建立時間由新到舊
+   */
+  order?: number
 }
 
 /**

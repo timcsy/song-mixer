@@ -29,6 +29,20 @@ function splitSongRecord(song: SongRecord): { meta: SongMeta; data: SongData } {
 }
 
 /**
+ * 歌曲列表排序：有 order 的依 order 由小到大；
+ * 沒有 order 的（新加入或舊資料）排在最前面，彼此依建立時間由新到舊
+ */
+function compareSongOrder(a: SongMeta, b: SongMeta): number {
+  const byCreatedDesc = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  const aHas = typeof a.order === 'number'
+  const bHas = typeof b.order === 'number'
+  if (!aHas && !bHas) return byCreatedDesc
+  if (!aHas) return -1
+  if (!bHas) return 1
+  return (a.order as number) - (b.order as number) || byCreatedDesc
+}
+
+/**
  * 將 IDBRequest 包裝成 Promise
  */
 function promisifyRequest<T>(request: IDBRequest<T>, errorMessage: string): Promise<T> {
@@ -162,8 +176,15 @@ class StorageService {
     const { meta, data } = splitSongRecord(song)
 
     const transaction = db.transaction([SONGS_STORE, SONG_DATA_STORE], 'readwrite')
+    const songsStore = transaction.objectStore(SONGS_STORE)
     transaction.objectStore(SONG_DATA_STORE).put(data)
-    transaction.objectStore(SONGS_STORE).put(meta)
+
+    // 覆寫既有歌曲（例如匯入時取代）時保留原本在列表中的位置
+    const existing = await promisifyRequest<SongMeta | undefined>(songsStore.get(meta.id), '儲存歌曲失敗')
+    if (meta.order === undefined && typeof existing?.order === 'number') {
+      meta.order = existing.order
+    }
+    songsStore.put(meta)
     await waitForTransaction(transaction, '儲存歌曲失敗')
   }
 
@@ -209,33 +230,37 @@ class StorageService {
   }
 
   /**
-   * 取得所有歌曲的 metadata（依建立時間排序，最新在前）
+   * 取得所有歌曲的 metadata（依列表自訂順序排列）
    * 不含音訊資料，歌曲數量多時也不會佔用大量記憶體
    */
   async getAllSongMetas(): Promise<SongMeta[]> {
     const db = await this.ensureInit()
+    const store = db.transaction([SONGS_STORE], 'readonly').objectStore(SONGS_STORE)
+    const songs = await promisifyRequest<SongMeta[]>(store.getAll(), '取得歌曲列表失敗')
+    return songs.sort(compareSongOrder)
+  }
 
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([SONGS_STORE], 'readonly')
-      const index = transaction.objectStore(SONGS_STORE).index('createdAt')
-      const request = index.openCursor(null, 'prev') // 降序排列
+  /**
+   * 設定歌曲列表順序
+   * @param orderedIds 依新順序排列的歌曲 id；未列出的歌曲維持原本的 order
+   */
+  async setSongOrder(orderedIds: string[]): Promise<void> {
+    const db = await this.ensureInit()
+    const orderById = new Map(orderedIds.map((id, index) => [id, index]))
 
-      const songs: SongMeta[] = []
-
-      request.onerror = () => {
-        reject(new Error(`取得歌曲列表失敗: ${request.error?.message}`))
+    const transaction = db.transaction([SONGS_STORE], 'readwrite')
+    const request = transaction.objectStore(SONGS_STORE).openCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const meta = cursor.value as SongMeta
+      const order = orderById.get(meta.id)
+      if (order !== undefined && meta.order !== order) {
+        cursor.update({ ...meta, order })
       }
-
-      request.onsuccess = () => {
-        const cursor = request.result
-        if (cursor) {
-          songs.push(cursor.value)
-          cursor.continue()
-        } else {
-          resolve(songs)
-        }
-      }
-    })
+      cursor.continue()
+    }
+    await waitForTransaction(transaction, '儲存歌曲順序失敗')
   }
 
   /**

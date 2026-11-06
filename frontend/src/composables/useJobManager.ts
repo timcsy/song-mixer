@@ -139,6 +139,106 @@ async function deleteJob(jobId: string): Promise<boolean> {
   }
 }
 
+// ========== 歌曲列表順序 ==========
+
+/** 可排序的欄位 */
+export type SongSortKey = 'title' | 'createdAt' | 'duration' | 'size'
+export type SortDirection = 'asc' | 'desc'
+
+const titleCollator = new Intl.Collator('zh-Hant', { numeric: true, sensitivity: 'base' })
+
+/**
+ * 標題分組：數字開頭 → 英文開頭 → 其他（中文等），與一般檔案管理員的習慣一致
+ * （zh-Hant 排序規則本身會把中文排在英文之前）
+ */
+function titleGroup(title: string): number {
+  const first = title.trim().charAt(0)
+  if (/[0-9]/.test(first)) return 0
+  if (/[A-Za-z]/.test(first)) return 1
+  return 2
+}
+
+function compareTitles(a: string, b: string): number {
+  return titleGroup(a) - titleGroup(b) || titleCollator.compare(a, b)
+}
+
+/**
+ * 依指定的 id 順序重新排列歌曲列表並儲存
+ * 先更新畫面再寫入 IndexedDB；寫入失敗時重新讀取以還原
+ */
+async function reorderSongs(orderedIds: string[]): Promise<void> {
+  const byId = new Map(localSongs.value.map(s => [s.id, s]))
+  const ids = orderedIds.filter(id => byId.has(id))
+  // 防呆：未列出的歌曲接在最後，避免遺失
+  for (const s of localSongs.value) {
+    if (!ids.includes(s.id)) ids.push(s.id)
+  }
+
+  localSongs.value = ids.map((id, order) => ({ ...byId.get(id)!, order }))
+
+  try {
+    await storageService.setSongOrder(ids)
+  } catch (err) {
+    console.error('Failed to save song order:', err)
+    await fetchLocalSongs()
+  }
+}
+
+/** 目前列表的 id 順序 */
+function currentSongIds(): string[] {
+  return localSongs.value.map(s => s.id)
+}
+
+/** 將一首歌從 fromIndex 移到 toIndex（拖曳） */
+function moveSong(fromIndex: number, toIndex: number): Promise<void> {
+  const ids = currentSongIds()
+  if (fromIndex < 0 || fromIndex >= ids.length || toIndex < 0 || toIndex >= ids.length) {
+    return Promise.resolve()
+  }
+  const [moved] = ids.splice(fromIndex, 1)
+  ids.splice(toIndex, 0, moved)
+  return reorderSongs(ids)
+}
+
+/** 將多首歌移到列表最上面或最下面（保持它們之間的相對順序） */
+function moveSongsTo(songIds: Iterable<string>, position: 'top' | 'bottom'): Promise<void> {
+  const moving = new Set(songIds)
+  const ids = currentSongIds()
+  const picked = ids.filter(id => moving.has(id))
+  const rest = ids.filter(id => !moving.has(id))
+  return reorderSongs(position === 'top' ? [...picked, ...rest] : [...rest, ...picked])
+}
+
+/** 隨機排序（Fisher–Yates） */
+function shuffleSongs(): Promise<void> {
+  const ids = currentSongIds()
+  for (let i = ids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[ids[i], ids[j]] = [ids[j], ids[i]]
+  }
+  return reorderSongs(ids)
+}
+
+/** 依欄位排序，排序結果成為新的自訂順序 */
+function sortSongs(key: SongSortKey, direction: SortDirection): Promise<void> {
+  const value = (s: SongMeta): number => {
+    switch (key) {
+      case 'createdAt': return new Date(s.createdAt).getTime()
+      case 'duration': return s.duration || 0
+      case 'size': return s.storageSize || 0
+      default: return 0
+    }
+  }
+  const sign = direction === 'asc' ? 1 : -1
+  // 穩定排序：值相同時維持原本順序
+  const sorted = [...localSongs.value].sort((a, b) =>
+    key === 'title'
+      ? sign * compareTitles(a.title || '', b.title || '')
+      : sign * (value(a) - value(b))
+  )
+  return reorderSongs(sorted.map(s => s.id))
+}
+
 // 手動刷新
 async function refreshJobs() {
   await fetchJobs()
@@ -274,5 +374,12 @@ export function useJobManager() {
     deleteJob,
     refreshJobs,
     getStorageUsage,
+
+    // 列表順序
+    reorderSongs,
+    moveSong,
+    moveSongsTo,
+    shuffleSongs,
+    sortSongs,
   }
 }
