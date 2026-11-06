@@ -73,6 +73,25 @@ export function stereoFloat32ToInt16Buffer(left: Float32Array, right: Float32Arr
 /**
  * 從 Int16 ArrayBuffer 還原為立體聲 Float32
  */
+/**
+ * 將 Int16 立體聲交錯 ArrayBuffer 直接解碼寫入左右聲道（例如 AudioBuffer.getChannelData）
+ * 不配置中間陣列，降低大型音軌轉換時的記憶體高峰
+ */
+export function decodeInt16StereoInto(
+  buffer: ArrayBuffer,
+  left: Float32Array,
+  right: Float32Array
+): void {
+  const interleaved = new Int16Array(buffer)
+  const length = Math.min(interleaved.length >> 1, left.length, right.length)
+  for (let i = 0; i < length; i++) {
+    const l = interleaved[i * 2]
+    const r = interleaved[i * 2 + 1]
+    left[i] = l < 0 ? l / 0x8000 : l / 0x7fff
+    right[i] = r < 0 ? r / 0x8000 : r / 0x7fff
+  }
+}
+
 export function int16BufferToStereoFloat32(buffer: ArrayBuffer): { left: Float32Array; right: Float32Array } {
   const interleaved = new Int16Array(buffer)
   const length = interleaved.length / 2

@@ -11,6 +11,8 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "demucs-web": "^1.0.0",
     "jszip": "^3.10.1",
     "onnxruntime-web": "^1.23.2",

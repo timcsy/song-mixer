@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, shallowRef, computed, onMounted, onBeforeUnmount } from 'vue';
 import JSZip from 'jszip';
 import { getBackendCapabilities, type JobWithResult, type OutputFormat } from '../services/api';
 import { storageService } from '@/services/storageService';
@@ -24,8 +24,16 @@ const isProcessing = computed(() => !isCompleted.value && !isFailed.value);
 // 後端功能偵測
 const backend = getBackendCapabilities();
 
-// 本地歌曲資料（純靜態模式）
-const localSong = ref<SongRecord | null>(null);
+// 本地歌曲狀態（純靜態模式）
+// 為了節省記憶體，不長期保留完整的 SongRecord：
+// - 影片轉成 Blob URL 後就放掉原本的 ArrayBuffer
+// - 音軌交給 AudioMixer 轉成 AudioBuffer 後就放掉 Int16 資料
+// - 匯出時再從 IndexedDB 讀取
+const songLoaded = ref(false);
+const hasVideo = ref(false);
+const videoSize = ref(0);
+// 只在 AudioMixer 載入音軌期間持有，載入完成或失敗後即釋放
+const mixerSongRecord = shallowRef<SongRecord | null>(null);
 
 // Video element reference for AudioMixer sync
 const videoElement = ref<HTMLVideoElement | null>(null);
@@ -39,10 +47,13 @@ const mixerError = ref<string | null>(null);
 
 const handleMixerReady = () => {
   mixerReady.value = true;
+  // 音軌已轉為 AudioBuffer，釋放原始 Int16 資料
+  mixerSongRecord.value = null;
 };
 
 const handleMixerError = (message: string) => {
   mixerError.value = message;
+  mixerSongRecord.value = null;
 };
 
 // ========== 下載功能 ==========
@@ -57,7 +68,7 @@ const formatOptions = computed(() => {
   ];
 
   // MP4/M4A 需要後端 FFmpeg 或本地原始影片
-  const canExportVideo = backend.available || localSong.value?.originalVideo;
+  const canExportVideo = backend.available || hasVideo.value;
   options.push(
     { value: 'm4a', label: 'M4A', disabled: !canExportVideo && !backend.ffmpeg },
     { value: 'mp4', label: 'MP4', disabled: !canExportVideo },
@@ -99,7 +110,7 @@ const startDownload = async () => {
     };
 
     await doDownload({
-      songId: localSong.value?.id,
+      songId: songLoaded.value ? props.job.id : undefined,
       format: selectedFormat.value,
       mixerSettings,
       title: props.job.source_title || '混音',
@@ -145,11 +156,13 @@ function int16ToWav(pcmData: ArrayBuffer, sampleRate: number, numChannels: numbe
 }
 
 const exportSong = async () => {
-  if (!localSong.value || isExporting.value) return;
+  if (!songLoaded.value || isExporting.value) return;
 
   isExporting.value = true;
   try {
-    const song = localSong.value;
+    // 匯出時才從 IndexedDB 讀取完整資料，用完即釋放
+    const song = await storageService.getSong(props.job.id);
+    if (!song) throw new Error('找不到歌曲資料');
     const zip = new JSZip();
     const sampleRate = song.sampleRate || 44100;
 
@@ -206,25 +219,33 @@ const exportSong = async () => {
   }
 };
 
+// 元件是否已卸載（避免載入完成時元件已切走，造成 Blob URL 洩漏）
+let isUnmounted = false;
+
 // 載入本地歌曲資料（純靜態模式）
 onMounted(async () => {
   // 嘗試從 IndexedDB 載入
   try {
     await storageService.init();
     const song = await storageService.getSong(props.job.id);
-    if (song) {
-      localSong.value = song;
-      // 如果沒有原始影片，預設選擇 WAV
-      if (!song.originalVideo) {
-        selectedFormat.value = 'wav';
-      }
+    if (!song || isUnmounted) return;
+
+    hasVideo.value = !!song.originalVideo;
+    videoSize.value = song.originalVideo?.byteLength ?? 0;
+    // 如果沒有原始影片，預設選擇 WAV
+    if (!song.originalVideo) {
+      selectedFormat.value = 'wav';
     }
+
+    // 影片轉成 Blob URL（Blob 會複製一份資料，之後不再引用原本的 ArrayBuffer）
+    setupVideoUrl(song.originalVideo);
+
+    // 音軌交給 AudioMixer，不帶影片
+    mixerSongRecord.value = { ...song, originalVideo: undefined };
+    songLoaded.value = true;
   } catch (err) {
     console.warn('無法載入本地歌曲資料:', err);
   }
-
-  // 設定影片 URL
-  await setupVideoUrl();
 });
 
 const statusText = computed(() => {
@@ -257,10 +278,10 @@ const progressText = computed(() => {
 const videoUrl = ref<string | null>(null);
 
 // 設定影片 URL
-const setupVideoUrl = async () => {
+const setupVideoUrl = (video?: ArrayBuffer) => {
   // 優先使用本地 IndexedDB 的影片
-  if (localSong.value?.originalVideo) {
-    const blob = new Blob([localSong.value.originalVideo], { type: 'video/mp4' });
+  if (video) {
+    const blob = new Blob([video], { type: 'video/mp4' });
     videoUrl.value = URL.createObjectURL(blob);
   }
   // 如無本地資料，才嘗試後端串流（舊版相容）
@@ -269,13 +290,23 @@ const setupVideoUrl = async () => {
   // }
 };
 
+// 元件卸載時釋放影片 Blob URL 與歌曲資料，避免切換歌曲時記憶體持續累積
+onBeforeUnmount(() => {
+  isUnmounted = true;
+  if (videoUrl.value) {
+    URL.revokeObjectURL(videoUrl.value);
+    videoUrl.value = null;
+  }
+  mixerSongRecord.value = null;
+});
+
 // streamUrl 向後相容
 const streamUrl = computed(() => videoUrl.value || '');
 
 const fileSizeText = computed(() => {
   // 優先使用本地歌曲的原始影片大小
-  if (localSong.value?.originalVideo) {
-    return formatFileSize(localSong.value.originalVideo.byteLength);
+  if (videoSize.value) {
+    return formatFileSize(videoSize.value);
   }
   // 後端返回的輸出大小
   if (props.job.result?.output_size) {
@@ -363,10 +394,10 @@ const durationText = computed(() => {
         <div class="right-panel">
           <!-- 等待本地歌曲載入或使用後端模式 -->
           <AudioMixer
-            v-if="backend.available || localSong"
+            v-if="backend.available || songLoaded"
             ref="audioMixerRef"
             :job-id="backend.available ? job.id : undefined"
-            :song-record="localSong || undefined"
+            :song-record="mixerSongRecord || undefined"
             :video-element="videoElement"
             :title="job.source_title || '音軌混音'"
             @ready="handleMixerReady"
@@ -429,7 +460,7 @@ const durationText = computed(() => {
             <span v-else>下載</span>
           </button>
           <button
-            v-if="localSong"
+            v-if="songLoaded"
             @click="exportSong"
             class="download-btn export"
             :disabled="isExporting"

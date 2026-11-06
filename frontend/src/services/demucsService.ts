@@ -1,18 +1,22 @@
 /**
- * Demucs-web 封裝服務
+ * Demucs 音源分離服務（主執行緒端）
  * Feature: 005-frontend-processing
  *
- * 使用 demucs-web npm 套件進行瀏覽器端音源分離
+ * 實際運算在 Web Worker 中執行（services/demucs/demucs.worker.ts），
+ * 主執行緒只負責傳送資料與接收進度／結果，不會因分離運算而卡住畫面。
+ * 若瀏覽器無法建立 module worker，會自動退回主執行緒執行（較易卡頓）。
  */
 
-import * as ort from 'onnxruntime-web'
-import { DemucsProcessor, CONSTANTS } from 'demucs-web'
-import type { SeparationResult } from '@/types/storage'
-import { stereoFloat32ToInt16Buffer, int16BufferToStereoFloat32 } from '@/utils/format'
+import type {
+  DemucsInitOptions,
+  DemucsRequest,
+  DemucsResponse,
+  DemucsTracksResult,
+  SeparationProgress,
+} from './demucs/protocol'
+import type { DemucsCore } from './demucs/demucsCore'
 
-// 設定 ONNX Runtime WASM 檔案路徑
-// 使用 jsDelivr CDN（支援 CORS，版本須與 npm 一致）
-ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.2/dist/'
+export type { DemucsTracksResult, SeparationProgress }
 
 /**
  * 檢查瀏覽器是否支援 WebGPU
@@ -79,115 +83,223 @@ function getSessionOptions(): Record<string, unknown> {
 }
 
 /**
- * 配置 ONNX Runtime 執行提供者
- * 自動判斷是否使用 WebGPU
- */
-function configureOnnxRuntime(): void {
-  if (isWebGPUSupported()) {
-    console.log('[Demucs] 偵測到 WebGPU 支援，使用 WebGPU 加速')
-  } else {
-    // 不支援 WebGPU，使用 WASM（CPU）模式
-    console.log('[Demucs] 使用 WASM（CPU）模式')
-  }
-}
-
-/**
  * 模型下載進度回呼
  */
 type DownloadProgressCallback = (loaded: number, total: number) => void
 
 /**
- * 分離進度回呼參數
+ * 執行後端介面（Worker 或主執行緒備援）
  */
-interface SeparationProgress {
-  progress: number
-  currentSegment: number
-  totalSegments: number
+interface DemucsBackend {
+  readonly kind: 'worker' | 'inline'
+  init(options: DemucsInitOptions, onDownloadProgress?: DownloadProgressCallback): Promise<void>
+  separateWav(wav: ArrayBuffer, onProgress?: (p: SeparationProgress) => void): Promise<DemucsTracksResult>
+  dispose(): void
 }
 
 /**
- * Demucs 服務封裝
+ * Worker 無法啟動（例如瀏覽器不支援 module worker）
+ * 遇到此錯誤時改用主執行緒備援
+ */
+class WorkerStartupError extends Error {}
+
+interface PendingRequest {
+  resolve: (result: DemucsTracksResult | undefined) => void
+  reject: (error: Error) => void
+  onProgress?: (p: SeparationProgress) => void
+  onDownloadProgress?: DownloadProgressCallback
+}
+
+/**
+ * Web Worker 後端
+ */
+function createWorkerBackend(): DemucsBackend {
+  const worker = new Worker(new URL('./demucs/demucs.worker.ts', import.meta.url), {
+    type: 'module',
+    name: 'demucs',
+  })
+  const pending = new Map<number, PendingRequest>()
+  let nextId = 1
+  // 收過任何訊息代表 Worker 腳本已成功載入
+  let started = false
+  let disposed = false
+
+  const failAll = (error: Error) => {
+    pending.forEach(p => p.reject(error))
+    pending.clear()
+  }
+
+  worker.onmessage = (event: MessageEvent<DemucsResponse>) => {
+    started = true
+    const msg = event.data
+
+    if (msg.type === 'log') {
+      console.log(`[Demucs ${msg.phase}] ${msg.msg}`)
+      return
+    }
+
+    const req = pending.get(msg.id)
+    if (!req) return
+
+    switch (msg.type) {
+      case 'downloadProgress':
+        req.onDownloadProgress?.(msg.loaded, msg.total)
+        break
+      case 'progress':
+        req.onProgress?.(msg.info)
+        break
+      case 'done':
+        pending.delete(msg.id)
+        req.resolve(msg.result)
+        break
+      case 'error':
+        pending.delete(msg.id)
+        req.reject(new Error(msg.message))
+        break
+    }
+  }
+
+  worker.onerror = (event: ErrorEvent) => {
+    event.preventDefault()
+    const message = event.message || 'Worker 發生未預期的錯誤'
+    failAll(started ? new Error(message) : new WorkerStartupError(message))
+  }
+
+  worker.onmessageerror = () => {
+    failAll(new Error('Worker 訊息解析失敗'))
+  }
+
+  const send = (
+    request: DemucsRequest,
+    callbacks: Omit<PendingRequest, 'resolve' | 'reject'>,
+    transfer: Transferable[] = []
+  ) => {
+    if (disposed) {
+      return Promise.reject(new Error('Demucs Worker 已釋放'))
+    }
+    return new Promise<DemucsTracksResult | undefined>((resolve, reject) => {
+      pending.set(request.id, { resolve, reject, ...callbacks })
+      worker.postMessage(request, transfer)
+    })
+  }
+
+  return {
+    kind: 'worker',
+
+    async init(options, onDownloadProgress) {
+      await send({ type: 'init', id: nextId++, options }, { onDownloadProgress })
+    },
+
+    async separateWav(wav, onProgress) {
+      // transfer：WAV 資料移交給 Worker，主執行緒不再保留一份
+      const result = await send({ type: 'separate', id: nextId++, wav }, { onProgress }, [wav])
+      if (!result) throw new Error('Worker 未回傳分離結果')
+      return result
+    },
+
+    dispose() {
+      disposed = true
+      failAll(new Error('Demucs Worker 已釋放'))
+      worker.terminate()
+    },
+  }
+}
+
+/**
+ * 主執行緒備援後端（無法使用 Worker 時）
+ */
+async function createInlineBackend(): Promise<DemucsBackend> {
+  const { createDemucsCore } = await import('./demucs/demucsCore')
+  let downloadCallback: DownloadProgressCallback | undefined
+  const core: DemucsCore = createDemucsCore({
+    onDownloadProgress: (loaded, total) => downloadCallback?.(loaded, total),
+    onLog: (phase, msg) => console.log(`[Demucs ${phase}] ${msg}`),
+  })
+
+  return {
+    kind: 'inline',
+    async init(options, onDownloadProgress) {
+      downloadCallback = onDownloadProgress
+      try {
+        await core.init(options)
+      } finally {
+        downloadCallback = undefined
+      }
+    },
+    separateWav: (wav, onProgress) => core.separateWav(wav, onProgress),
+    dispose() {
+      // 主執行緒模式無需額外釋放
+    },
+  }
+}
+
+/**
+ * Demucs 服務
  */
 class DemucsService {
-  private processor: DemucsProcessor | null = null
+  private backend: DemucsBackend | null = null
   private modelLoaded = false
   private loadingPromise: Promise<void> | null = null
-  private downloadProgressCallback: DownloadProgressCallback | null = null
-  private separationProgressCallback: ((p: SeparationProgress) => void) | null = null
+  private workerUnavailable = false
 
   /**
    * 初始化並載入模型（延遲載入）
    * @param onDownloadProgress 模型下載進度回呼 (loaded, total) bytes
    */
   async initialize(onDownloadProgress?: DownloadProgressCallback): Promise<void> {
+    if (this.modelLoaded) return
+
     // 防止重複載入
     if (this.loadingPromise) {
       return this.loadingPromise
-    }
-
-    if (this.modelLoaded) {
-      return
     }
 
     this.loadingPromise = this.loadModel(onDownloadProgress)
     return this.loadingPromise
   }
 
-  /**
-   * 載入模型
-   */
   private async loadModel(onDownloadProgress?: DownloadProgressCallback): Promise<void> {
+    const options: DemucsInitOptions = { sessionOptions: getSessionOptions() }
+    console.log(
+      isWebGPUSupported()
+        ? '[Demucs] 偵測到 WebGPU 支援，使用 WebGPU 加速'
+        : '[Demucs] 使用 WASM（CPU）模式'
+    )
+
     try {
-      // 配置 ONNX Runtime（自動判斷 WebGPU 支援）
-      configureOnnxRuntime()
-
-      // 儲存下載進度回呼
-      this.downloadProgressCallback = onDownloadProgress || null
-
-      // 取得適合裝置的 session options
-      const sessionOptions = getSessionOptions()
-
-      // demucs-web 沒有完整的 TypeScript 定義，使用 any 繞過
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const processorOptions: any = {
-        ort,
-        sessionOptions,
-        // onProgress 接收物件 { progress, currentSegment, totalSegments }
-        onProgress: (progressInfo: any) => {
-          // 分離進度（非下載進度）
-          if (this.separationProgressCallback && progressInfo) {
-            this.separationProgressCallback({
-              progress: progressInfo.progress ?? 0,
-              currentSegment: progressInfo.currentSegment ?? 0,
-              totalSegments: progressInfo.totalSegments ?? 1,
-            })
-          }
-        },
-        // onDownloadProgress 接收 (loaded, total) bytes
-        onDownloadProgress: (loaded: number, total: number) => {
-          // 模型下載進度
-          if (this.downloadProgressCallback) {
-            this.downloadProgressCallback(loaded, total)
-          }
-          const percent = ((loaded / total) * 100).toFixed(1)
-          const loadedMB = (loaded / 1024 / 1024).toFixed(1)
-          const totalMB = (total / 1024 / 1024).toFixed(1)
-          console.log(`[Demucs] 下載模型: ${loadedMB}/${totalMB} MB (${percent}%)`)
-        },
-        onLog: (phase: string, msg: string) => {
-          console.log(`[Demucs ${phase}] ${msg}`)
-        },
+      try {
+        this.backend = await this.createBackend()
+        await this.backend.init(options, onDownloadProgress)
+      } catch (error) {
+        if (!(error instanceof WorkerStartupError)) throw error
+        // Worker 無法啟動 → 改用主執行緒
+        console.warn('[Demucs] 無法啟動 Web Worker，改在主執行緒執行（處理時畫面可能卡頓）:', error.message)
+        this.backend?.dispose()
+        this.workerUnavailable = true
+        this.backend = await this.createBackend()
+        await this.backend.init(options, onDownloadProgress)
       }
-      this.processor = new DemucsProcessor(processorOptions)
-
-      await this.processor.loadModel(CONSTANTS.DEFAULT_MODEL_URL)
+      console.log(`[Demucs] 模型載入完成（${this.backend.kind === 'worker' ? 'Web Worker' : '主執行緒'}）`)
       this.modelLoaded = true
-      this.downloadProgressCallback = null
     } catch (error) {
-      this.loadingPromise = null
-      this.downloadProgressCallback = null
+      this.backend?.dispose()
+      this.backend = null
       throw new Error(`模型載入失敗: ${error instanceof Error ? error.message : '未知錯誤'}`)
+    } finally {
+      this.loadingPromise = null
     }
+  }
+
+  private async createBackend(): Promise<DemucsBackend> {
+    if (!this.workerUnavailable && typeof Worker !== 'undefined') {
+      try {
+        return createWorkerBackend()
+      } catch (error) {
+        console.warn('[Demucs] 建立 Web Worker 失敗:', error)
+        this.workerUnavailable = true
+      }
+    }
+    return createInlineBackend()
   }
 
   /**
@@ -198,87 +310,42 @@ class DemucsService {
   }
 
   /**
-   * 執行音源分離
-   * @param left 左聲道 Float32Array (44.1kHz)
-   * @param right 右聲道 Float32Array (44.1kHz)
+   * 解析 WAV 並執行音源分離
+   *
+   * 注意：wav 會以 transfer 移交給 Worker，呼叫後原本的 ArrayBuffer 會變成空的（detached），
+   * 呼叫端不可再使用。
+   *
+   * @param wav WAV 檔案資料（ffmpeg 輸出的 16-bit PCM）
    * @param onProgress 分離進度回呼 { progress: 0-1, currentSegment, totalSegments }
+   * @returns 四軌 Int16 立體聲交錯資料、取樣率與時長
    */
-  async separate(
-    left: Float32Array,
-    right: Float32Array,
-    onProgress?: (info: { progress: number; currentSegment: number; totalSegments: number }) => void
-  ): Promise<SeparationResult> {
-    if (!this.processor || !this.modelLoaded) {
+  async separateWav(
+    wav: ArrayBuffer,
+    onProgress?: (info: SeparationProgress) => void
+  ): Promise<DemucsTracksResult> {
+    if (!this.backend || !this.modelLoaded) {
       throw new Error('模型尚未載入，請先呼叫 initialize()')
     }
 
     try {
-      // 設定分離進度回呼（透過 processor 建構時的 onProgress）
-      this.separationProgressCallback = onProgress
-        ? (info) => {
-            if (typeof info.progress === 'number' && !isNaN(info.progress) && isFinite(info.progress)) {
-              onProgress({
-                progress: Math.max(0, Math.min(1, info.progress)),
-                currentSegment: info.currentSegment,
-                totalSegments: info.totalSegments,
-              })
-            }
-          }
-        : null
-
-      const result = await this.processor.separate(left, right)
-      this.separationProgressCallback = null
-
-      return {
-        drums: {
-          left: result.drums.left,
-          right: result.drums.right,
-        },
-        bass: {
-          left: result.bass.left,
-          right: result.bass.right,
-        },
-        other: {
-          left: result.other.left,
-          right: result.other.right,
-        },
-        vocals: {
-          left: result.vocals.left,
-          right: result.vocals.right,
-        },
-      }
+      return await this.backend.separateWav(wav, onProgress)
     } catch (error) {
-      this.separationProgressCallback = null
+      // Worker 崩潰（例如記憶體不足）時重置，下次重新建立
+      if (this.backend.kind === 'worker') {
+        this.dispose()
+      }
       throw new Error(`音源分離失敗: ${error instanceof Error ? error.message : '未知錯誤'}`)
     }
   }
 
   /**
-   * 將分離結果轉換為 ArrayBuffer（用於儲存）
-   * 使用 Int16 格式減少 50% 儲存空間
-   */
-  stereoToArrayBuffer(left: Float32Array, right: Float32Array): ArrayBuffer {
-    return stereoFloat32ToInt16Buffer(left, right)
-  }
-
-  /**
-   * 從 ArrayBuffer 還原為立體聲
-   * 從 Int16 格式還原為 Float32
-   */
-  arrayBufferToStereo(buffer: ArrayBuffer): { left: Float32Array; right: Float32Array } {
-    return int16BufferToStereoFloat32(buffer)
-  }
-
-  /**
-   * 釋放資源
+   * 釋放資源（終止 Worker）
    */
   dispose(): void {
-    if (this.processor) {
-      // demucs-web 可能沒有 dispose 方法，依實際 API 調整
-      this.processor = null
-      this.modelLoaded = false
-      this.loadingPromise = null
-    }
+    this.backend?.dispose()
+    this.backend = null
+    this.modelLoaded = false
+    this.loadingPromise = null
   }
 }
 
